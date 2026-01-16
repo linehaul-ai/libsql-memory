@@ -51,7 +51,7 @@ src/plugin/
 **Configuration Priority** (lowest to highest): defaults → config file → environment variables (`LIBSQL_MEMORY_*` prefix) → command-line flags
 
 **Embedding Providers**:
-- Nomic: Local model, 768 dimensions, default endpoint `http://192.168.128.10:1234/v1/embeddings`
+- Nomic: text-embedding-qwen3-embedding-8b model, 768 dimensions, default endpoint `http://192.168.128.10:1234/v1/embeddings`
 - OpenAI: `text-embedding-3-small`, 1536 dimensions
 - Local: TF-IDF + hash-based, 384 dimensions, zero external dependencies
 
