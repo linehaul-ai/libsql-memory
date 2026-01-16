@@ -20,9 +20,9 @@ import (
 
 // LibSQLContainer wraps a running LibSQL container for testing.
 type LibSQLContainer struct {
-	Container  testcontainers.Container
-	Host       string
-	Port       string
+	Container    testcontainers.Container
+	Host         string
+	Port         string
 	HTTPEndpoint string
 }
 

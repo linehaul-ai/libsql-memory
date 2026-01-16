@@ -39,7 +39,16 @@ claude --plugin-dir /path/to/libsql-memory
 
 Copy to your project as a local plugin:
 ```bash
-cp -r /path/to/libsql-memory /your/project/.claude-plugin/
+# Copy entire plugin directory
+cp -r /path/to/libsql-memory /your/project/libsql-memory
+
+# Then run Claude with the plugin directory
+cd /your/project && claude --plugin-dir ./libsql-memory
+```
+
+Or install globally:
+```bash
+claude plugins add https://github.com/linehaul-ai/libsql-memory.git
 ```
 
 ## Components
