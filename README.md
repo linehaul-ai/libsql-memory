@@ -20,7 +20,7 @@ That's it! The plugin will automatically:
 
 ## Prerequisites
 
-**Nomic embedding server** running at http://192.168.128.10:1234 (default)
+**Nomic embedding server** (text-embedding-qwen3-embedding-8b) running at http://192.168.128.10:1234 (default)
 
 Or use local embeddings (no external dependencies):
 ```bash
