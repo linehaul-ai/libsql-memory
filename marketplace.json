@@ -1,12 +1,22 @@
 {
+  "name": "linehaulai-claude-marketplace",
+  "owner": {
+    "name": "fakebizprez",
+    "email": "anthony@linehaul.ai"
+  },
+  "metadata": {
+    "description": "LineHaul AI plugins for Claude Code",
+    "version": "1.0.0"
+  },
   "plugins": [
     {
       "name": "libsql-memory",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/linehaul-ai/libsql-memory.git"
+      },
       "description": "Persistent semantic memory for Claude Code with vector search",
-      "repository": "https://github.com/linehaul-ai/libsql-memory",
-      "version": "1.0.0",
-      "author": "fakebizprez",
-      "keywords": ["memory", "vector-search", "persistence", "semantic", "libsql"]
+      "version": "1.0.0"
     }
   ]
 }
