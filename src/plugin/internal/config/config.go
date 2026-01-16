@@ -17,11 +17,12 @@ import (
 
 // Default configuration values
 const (
-	DefaultEmbeddingDimension = 1536
-	DefaultNamespace          = "default"
-	DefaultMaxConnections     = 10
-	DefaultLogLevel           = "info"
-	DefaultEmbeddingProvider  = "openai"
+	DefaultEmbeddingDimension      = 768 // Default to Nomic dimension
+	DefaultNamespace               = "default"
+	DefaultMaxConnections          = 10
+	DefaultLogLevel                = "info"
+	DefaultEmbeddingProvider       = "nomic" // Default to local Nomic model
+	DefaultNomicEmbeddingEndpoint  = "http://192.168.128.10:1234/v1/embeddings"
 )
 
 // Environment variable prefix
@@ -35,13 +36,16 @@ type Config struct {
 	// AuthToken is used for Turso authentication (optional for local databases)
 	AuthToken string `json:"auth_token" yaml:"auth_token"`
 
-	// EmbeddingProvider specifies which embedding service to use ("openai" or "local")
+	// EmbeddingProvider specifies which embedding service to use ("openai", "nomic", or "local")
 	EmbeddingProvider string `json:"embedding_provider" yaml:"embedding_provider"`
 
 	// OpenAIAPIKey is the API key for OpenAI embeddings (required if provider is "openai")
 	OpenAIAPIKey string `json:"openai_api_key" yaml:"openai_api_key"`
 
-	// EmbeddingDimension is the dimension of embedding vectors (default: 1536 for OpenAI)
+	// EmbeddingEndpoint is the API endpoint for embeddings (used for nomic provider)
+	EmbeddingEndpoint string `json:"embedding_endpoint" yaml:"embedding_endpoint"`
+
+	// EmbeddingDimension is the dimension of embedding vectors (default: 768 for Nomic)
 	EmbeddingDimension int `json:"embedding_dimension" yaml:"embedding_dimension"`
 
 	// DefaultNamespace is the default namespace for memory operations
@@ -85,6 +89,13 @@ func WithOpenAIAPIKey(key string) Option {
 	}
 }
 
+// WithEmbeddingEndpoint sets the embedding API endpoint
+func WithEmbeddingEndpoint(endpoint string) Option {
+	return func(c *Config) {
+		c.EmbeddingEndpoint = endpoint
+	}
+}
+
 // WithEmbeddingDimension sets the embedding dimension
 func WithEmbeddingDimension(dim int) Option {
 	return func(c *Config) {
@@ -118,6 +129,7 @@ func WithLogLevel(level string) Option {
 func NewConfig(opts ...Option) *Config {
 	cfg := &Config{
 		EmbeddingProvider:  DefaultEmbeddingProvider,
+		EmbeddingEndpoint:  DefaultNomicEmbeddingEndpoint,
 		EmbeddingDimension: DefaultEmbeddingDimension,
 		DefaultNamespace:   DefaultNamespace,
 		MaxConnections:     DefaultMaxConnections,
@@ -151,6 +163,10 @@ func LoadFromEnv() *Config {
 
 	if v := os.Getenv(envPrefix + "OPENAI_API_KEY"); v != "" {
 		cfg.OpenAIAPIKey = v
+	}
+
+	if v := os.Getenv(envPrefix + "EMBEDDING_ENDPOINT"); v != "" {
+		cfg.EmbeddingEndpoint = v
 	}
 
 	if v := os.Getenv(envPrefix + "EMBEDDING_DIMENSION"); v != "" {
@@ -219,6 +235,8 @@ func LoadFromFlags(args []string) (*Config, error) {
 		"Embedding provider (openai or local)")
 	fs.StringVar(&cfg.OpenAIAPIKey, "openai-api-key", cfg.OpenAIAPIKey,
 		"OpenAI API key for embeddings")
+	fs.StringVar(&cfg.EmbeddingEndpoint, "embedding-endpoint", cfg.EmbeddingEndpoint,
+		"Embedding API endpoint (for nomic provider)")
 	fs.IntVar(&cfg.EmbeddingDimension, "embedding-dimension", cfg.EmbeddingDimension,
 		"Embedding vector dimension")
 	fs.StringVar(&cfg.DefaultNamespace, "default-namespace", cfg.DefaultNamespace,
@@ -300,13 +318,17 @@ func (c *Config) Validate() error {
 		errs = append(errs, "database_path is required")
 	}
 
-	validProviders := map[string]bool{"openai": true, "local": true}
+	validProviders := map[string]bool{"openai": true, "nomic": true, "local": true}
 	if !validProviders[strings.ToLower(c.EmbeddingProvider)] {
-		errs = append(errs, fmt.Sprintf("embedding_provider must be 'openai' or 'local', got '%s'", c.EmbeddingProvider))
+		errs = append(errs, fmt.Sprintf("embedding_provider must be 'openai', 'nomic', or 'local', got '%s'", c.EmbeddingProvider))
 	}
 
 	if strings.ToLower(c.EmbeddingProvider) == "openai" && c.OpenAIAPIKey == "" {
 		errs = append(errs, "openai_api_key is required when embedding_provider is 'openai'")
+	}
+
+	if strings.ToLower(c.EmbeddingProvider) == "nomic" && c.EmbeddingEndpoint == "" {
+		errs = append(errs, "embedding_endpoint is required when embedding_provider is 'nomic'")
 	}
 
 	if c.EmbeddingDimension <= 0 {
@@ -371,6 +393,7 @@ func (c *Config) Clone() *Config {
 		AuthToken:          c.AuthToken,
 		EmbeddingProvider:  c.EmbeddingProvider,
 		OpenAIAPIKey:       c.OpenAIAPIKey,
+		EmbeddingEndpoint:  c.EmbeddingEndpoint,
 		EmbeddingDimension: c.EmbeddingDimension,
 		DefaultNamespace:   c.DefaultNamespace,
 		MaxConnections:     c.MaxConnections,
@@ -393,6 +416,8 @@ func mergeConfigs(base, override *Config, fs *flag.FlagSet) *Config {
 			result.EmbeddingProvider = override.EmbeddingProvider
 		case "openai-api-key":
 			result.OpenAIAPIKey = override.OpenAIAPIKey
+		case "embedding-endpoint":
+			result.EmbeddingEndpoint = override.EmbeddingEndpoint
 		case "embedding-dimension":
 			result.EmbeddingDimension = override.EmbeddingDimension
 		case "default-namespace":
@@ -423,6 +448,9 @@ func mergeWithEnv(base, env *Config) *Config {
 	if os.Getenv(envPrefix+"OPENAI_API_KEY") != "" {
 		result.OpenAIAPIKey = env.OpenAIAPIKey
 	}
+	if os.Getenv(envPrefix+"EMBEDDING_ENDPOINT") != "" {
+		result.EmbeddingEndpoint = env.EmbeddingEndpoint
+	}
 	if os.Getenv(envPrefix+"EMBEDDING_DIMENSION") != "" {
 		result.EmbeddingDimension = env.EmbeddingDimension
 	}
@@ -450,6 +478,7 @@ func mergeWithFlags(base, flagCfg *Config, args []string) *Config {
 	fs.StringVar(&tempCfg.AuthToken, "auth-token", "", "")
 	fs.StringVar(&tempCfg.EmbeddingProvider, "embedding-provider", "", "")
 	fs.StringVar(&tempCfg.OpenAIAPIKey, "openai-api-key", "", "")
+	fs.StringVar(&tempCfg.EmbeddingEndpoint, "embedding-endpoint", "", "")
 	fs.IntVar(&tempCfg.EmbeddingDimension, "embedding-dimension", 0, "")
 	fs.StringVar(&tempCfg.DefaultNamespace, "default-namespace", "", "")
 	fs.IntVar(&tempCfg.MaxConnections, "max-connections", 0, "")
@@ -468,6 +497,8 @@ func mergeWithFlags(base, flagCfg *Config, args []string) *Config {
 			result.EmbeddingProvider = flagCfg.EmbeddingProvider
 		case "openai-api-key":
 			result.OpenAIAPIKey = flagCfg.OpenAIAPIKey
+		case "embedding-endpoint":
+			result.EmbeddingEndpoint = flagCfg.EmbeddingEndpoint
 		case "embedding-dimension":
 			result.EmbeddingDimension = flagCfg.EmbeddingDimension
 		case "default-namespace":

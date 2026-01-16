@@ -21,8 +21,6 @@ import (
 	"sync"
 	"time"
 	"unicode"
-
-	libsqlvector "github.com/ryanskidmore/libsql-vector-go"
 )
 
 // Common errors returned by embedding operations.
@@ -41,8 +39,11 @@ var (
 const (
 	DefaultOpenAIDimension = 1536
 	DefaultLocalDimension  = 384
+	DefaultNomicDimension  = 768 // nomic-embed-text-v1.5 outputs 768 dimensions
 	DefaultOpenAIModel     = "text-embedding-3-small"
+	DefaultNomicModel      = "text-embedding-nomic-embed-text-v1.5@q8_0"
 	DefaultOpenAIEndpoint  = "https://api.openai.com/v1/embeddings"
+	DefaultNomicEndpoint   = "http://192.168.128.10:1234/v1/embeddings"
 	DefaultRequestTimeout  = 30 * time.Second
 	DefaultMaxRetries      = 3
 	DefaultRetryBaseDelay  = 1 * time.Second
@@ -97,17 +98,29 @@ func (v Vector) CosineSimilarity(other Vector) (float64, error) {
 
 // ToBytes serializes the vector to binary format for database storage.
 func (v Vector) ToBytes() ([]byte, error) {
-	vec := libsqlvector.NewVector([]float32(v))
-	return vec.EncodeBinary(nil)
+	if v == nil {
+		return nil, nil
+	}
+	buf := make([]byte, len(v)*4)
+	for i, val := range v {
+		binary.LittleEndian.PutUint32(buf[i*4:], math.Float32bits(val))
+	}
+	return buf, nil
 }
 
 // VectorFromBytes deserializes a vector from binary bytes.
 func VectorFromBytes(data []byte) (Vector, error) {
-	var vec libsqlvector.Vector
-	if err := vec.DecodeBinary(data); err != nil {
-		return nil, fmt.Errorf("failed to deserialize vector: %w", err)
+	if len(data) == 0 {
+		return nil, nil
 	}
-	return Vector(vec.Slice()), nil
+	if len(data)%4 != 0 {
+		return nil, fmt.Errorf("invalid vector data length: %d", len(data))
+	}
+	vec := make(Vector, len(data)/4)
+	for i := range vec {
+		vec[i] = math.Float32frombits(binary.LittleEndian.Uint32(data[i*4:]))
+	}
+	return vec, nil
 }
 
 // EmbedderConfig holds configuration for embedding providers.
@@ -145,6 +158,22 @@ func DefaultOpenAIConfig(apiKey string) EmbedderConfig {
 func DefaultLocalConfig() EmbedderConfig {
 	return EmbedderConfig{
 		Dimension: DefaultLocalDimension,
+	}
+}
+
+// DefaultNomicConfig returns the default configuration for local Nomic embedder.
+func DefaultNomicConfig(endpoint string) EmbedderConfig {
+	if endpoint == "" {
+		endpoint = DefaultNomicEndpoint
+	}
+	return EmbedderConfig{
+		Dimension:      DefaultNomicDimension,
+		Model:          DefaultNomicModel,
+		Endpoint:       endpoint,
+		RequestTimeout: DefaultRequestTimeout,
+		MaxRetries:     DefaultMaxRetries,
+		RetryBaseDelay: DefaultRetryBaseDelay,
+		RateLimitRPM:   0, // No rate limit for local server
 	}
 }
 
@@ -742,6 +771,183 @@ func isRetryableError(err error) bool {
 }
 
 // -----------------------------------------------------------------------------
+// NomicEmbedder: Local Nomic embedding model client
+// -----------------------------------------------------------------------------
+
+// NomicEmbedder generates embeddings using a locally running Nomic model server.
+// This uses the OpenAI-compatible API format that most local servers support.
+type NomicEmbedder struct {
+	config     EmbedderConfig
+	httpClient *http.Client
+}
+
+// NewNomicEmbedder creates a new Nomic embedder with the given configuration.
+func NewNomicEmbedder(config EmbedderConfig) (*NomicEmbedder, error) {
+	// Apply defaults
+	if config.Model == "" {
+		config.Model = DefaultNomicModel
+	}
+	if config.Endpoint == "" {
+		config.Endpoint = DefaultNomicEndpoint
+	}
+	if config.Dimension <= 0 {
+		config.Dimension = DefaultNomicDimension
+	}
+	if config.RequestTimeout <= 0 {
+		config.RequestTimeout = DefaultRequestTimeout
+	}
+	if config.MaxRetries <= 0 {
+		config.MaxRetries = DefaultMaxRetries
+	}
+	if config.RetryBaseDelay <= 0 {
+		config.RetryBaseDelay = DefaultRetryBaseDelay
+	}
+
+	return &NomicEmbedder{
+		config: config,
+		httpClient: &http.Client{
+			Timeout: config.RequestTimeout,
+			Transport: &http.Transport{
+				MaxIdleConns:        100,
+				MaxIdleConnsPerHost: 100,
+				IdleConnTimeout:     90 * time.Second,
+			},
+		},
+	}, nil
+}
+
+// Dimension returns the output vector dimension.
+func (e *NomicEmbedder) Dimension() int {
+	return e.config.Dimension
+}
+
+// Close releases resources held by the embedder.
+func (e *NomicEmbedder) Close() error {
+	e.httpClient.CloseIdleConnections()
+	return nil
+}
+
+// Embed generates an embedding for the given text using the local Nomic server.
+func (e *NomicEmbedder) Embed(ctx context.Context, text string) (Vector, error) {
+	if strings.TrimSpace(text) == "" {
+		return nil, ErrEmptyText
+	}
+
+	vectors, err := e.EmbedBatch(ctx, []string{text})
+	if err != nil {
+		return nil, err
+	}
+
+	return vectors[0], nil
+}
+
+// EmbedBatch generates embeddings for multiple texts in a single API call.
+func (e *NomicEmbedder) EmbedBatch(ctx context.Context, texts []string) ([]Vector, error) {
+	if len(texts) == 0 {
+		return nil, nil
+	}
+
+	// Validate inputs
+	for i, text := range texts {
+		if strings.TrimSpace(text) == "" {
+			return nil, fmt.Errorf("%w at index %d", ErrEmptyText, i)
+		}
+	}
+
+	// Prepare request (OpenAI-compatible format)
+	reqBody := openAIRequest{
+		Input: texts,
+		Model: e.config.Model,
+	}
+
+	var lastErr error
+	for attempt := 0; attempt < e.config.MaxRetries; attempt++ {
+		if attempt > 0 {
+			// Exponential backoff
+			delay := e.config.RetryBaseDelay * time.Duration(1<<uint(attempt-1))
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(delay):
+			}
+		}
+
+		vectors, err := e.doRequest(ctx, reqBody)
+		if err == nil {
+			return vectors, nil
+		}
+
+		lastErr = err
+
+		// Check if error is retryable
+		if !isRetryableError(err) {
+			return nil, err
+		}
+	}
+
+	return nil, fmt.Errorf("%w after %d attempts: %v", ErrAPIRequestFailed, e.config.MaxRetries, lastErr)
+}
+
+// doRequest performs the actual HTTP request to the local Nomic server.
+func (e *NomicEmbedder) doRequest(ctx context.Context, reqBody openAIRequest) ([]Vector, error) {
+	jsonBody, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.config.Endpoint, bytes.NewReader(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := e.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	// Handle HTTP errors
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("%w: HTTP %d: %s", ErrAPIRequestFailed, resp.StatusCode, string(body))
+	}
+
+	// Parse successful response (OpenAI-compatible format)
+	var apiResp openAIResponse
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		return nil, fmt.Errorf("%w: failed to parse response: %v", ErrInvalidResponse, err)
+	}
+
+	if apiResp.Error != nil {
+		return nil, fmt.Errorf("%w: %s", ErrAPIRequestFailed, apiResp.Error.Message)
+	}
+
+	// Extract embeddings in correct order
+	vectors := make([]Vector, len(apiResp.Data))
+	for _, item := range apiResp.Data {
+		if item.Index >= len(vectors) {
+			return nil, fmt.Errorf("%w: invalid embedding index %d", ErrInvalidResponse, item.Index)
+		}
+		vectors[item.Index] = Vector(item.Embedding)
+	}
+
+	// Verify all vectors were received
+	for i, vec := range vectors {
+		if vec == nil {
+			return nil, fmt.Errorf("%w: missing embedding at index %d", ErrInvalidResponse, i)
+		}
+	}
+
+	return vectors, nil
+}
+
+// -----------------------------------------------------------------------------
 // VectorIndex: Similarity search using libsql vector index
 // -----------------------------------------------------------------------------
 
@@ -1151,6 +1357,39 @@ func NewEmbedder(apiKey string, dimension int) (Embedder, error) {
 		config.Dimension = dimension
 	}
 	return NewLocalEmbedder(config), nil
+}
+
+// NewEmbedderByProvider creates an embedder based on the specified provider.
+// Supported providers: "openai", "nomic", "local"
+func NewEmbedderByProvider(provider, apiKey, endpoint string, dimension int) (Embedder, error) {
+	switch strings.ToLower(provider) {
+	case "openai":
+		if apiKey == "" {
+			return nil, ErrAPIKeyMissing
+		}
+		config := DefaultOpenAIConfig(apiKey)
+		if dimension > 0 {
+			config.Dimension = dimension
+		}
+		return NewOpenAIEmbedder(config)
+
+	case "nomic":
+		config := DefaultNomicConfig(endpoint)
+		if dimension > 0 {
+			config.Dimension = dimension
+		}
+		return NewNomicEmbedder(config)
+
+	case "local":
+		config := DefaultLocalConfig()
+		if dimension > 0 {
+			config.Dimension = dimension
+		}
+		return NewLocalEmbedder(config), nil
+
+	default:
+		return nil, fmt.Errorf("unknown embedding provider: %s", provider)
+	}
 }
 
 // NewEmbedderWithFallback creates an embedder with automatic fallback.

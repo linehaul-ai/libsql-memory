@@ -101,19 +101,13 @@ func main() {
 func run(ctx context.Context, cfg *config.Config) error {
 	log.Printf("[INFO] Initializing database connection...")
 
-	// Determine database URL
-	dbURL := cfg.DatabasePath
-	if cfg.IsTursoURL() {
-		dbURL = cfg.DatabasePath
+	// Initialize database with context
+	dbConfig := db.Config{
+		Path:             cfg.DatabasePath,
+		VectorDimensions: cfg.EmbeddingDimension,
 	}
 
-	// Initialize database with context
-	database, err := db.New(ctx, db.Config{
-		Path:             dbURL,
-		URL:              cfg.DatabasePath,
-		AuthToken:        cfg.AuthToken,
-		VectorDimensions: cfg.EmbeddingDimension,
-	})
+	database, err := db.New(ctx, dbConfig)
 	if err != nil {
 		return fmt.Errorf("failed to initialize database: %w", err)
 	}
@@ -169,6 +163,13 @@ func initEmbedder(cfg *config.Config) (embedding.Embedder, error) {
 			openAICfg.Dimension = cfg.EmbeddingDimension
 		}
 		return embedding.NewOpenAIEmbedder(openAICfg)
+	case "nomic":
+		nomicCfg := embedding.DefaultNomicConfig(cfg.EmbeddingEndpoint)
+		if cfg.EmbeddingDimension > 0 {
+			nomicCfg.Dimension = cfg.EmbeddingDimension
+		}
+		log.Printf("[INFO] Using Nomic model at endpoint: %s", nomicCfg.Endpoint)
+		return embedding.NewNomicEmbedder(nomicCfg)
 	case "local":
 		localCfg := embedding.DefaultLocalConfig()
 		if cfg.EmbeddingDimension > 0 {

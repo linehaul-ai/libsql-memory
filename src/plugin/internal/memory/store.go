@@ -447,15 +447,6 @@ func (s *Store) ListNamespaces(ctx context.Context) ([]string, error) {
 	return s.database.ListNamespaces(ctx)
 }
 
-// Sync triggers a manual sync with remote database (for embedded replicas).
-func (s *Store) Sync(ctx context.Context) (*db.SyncResult, error) {
-	if s.closed {
-		return nil, ErrStoreClosed
-	}
-
-	return s.database.Sync(ctx)
-}
-
 // Stats returns database statistics.
 func (s *Store) Stats(ctx context.Context) (*db.Stats, error) {
 	if s.closed {

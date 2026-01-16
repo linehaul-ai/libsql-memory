@@ -1,55 +1,86 @@
-// Package db provides the core LibSQL database layer for the Claude memory plugin.
+// Package db provides the LibSQL database layer for the Claude memory plugin.
 // It implements connection pooling, vector search capabilities, and graceful shutdown.
+// Uses LibSQL (SQLite fork) with native vector indexing support.
 package db
 
 import (
 	"context"
 	"database/sql"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
-	libsqlvector "github.com/ryanskidmore/libsql-vector-go"
-	"github.com/tursodatabase/go-libsql"
+	_ "github.com/tursodatabase/go-libsql" // LibSQL driver
 )
 
 // Common errors returned by the database layer.
 var (
-	ErrNotFound       = errors.New("memory not found")
-	ErrDuplicateKey   = errors.New("duplicate key in namespace")
-	ErrInvalidConfig  = errors.New("invalid database configuration")
-	ErrClosed         = errors.New("database connection closed")
-	ErrInvalidVector  = errors.New("invalid vector dimensions")
-	ErrContextClosed  = errors.New("context cancelled or deadline exceeded")
+	ErrNotFound      = errors.New("memory not found")
+	ErrDuplicateKey  = errors.New("duplicate key in namespace")
+	ErrInvalidConfig = errors.New("invalid database configuration")
+	ErrClosed        = errors.New("database connection closed")
+	ErrInvalidVector = errors.New("invalid vector dimensions")
+	ErrContextClosed = errors.New("context cancelled or deadline exceeded")
 )
 
-// deserializeVector converts a byte slice from the database back to []float32.
-// The libsqlvector.Vector type handles the SQL scanning, but we need to convert
-// the raw blob back to a float32 slice for our Memory struct.
+// serializeVector converts a []float32 to bytes for storage.
+func serializeVector(vec []float32) []byte {
+	if vec == nil {
+		return nil
+	}
+	buf := make([]byte, len(vec)*4)
+	for i, v := range vec {
+		binary.LittleEndian.PutUint32(buf[i*4:], math.Float32bits(v))
+	}
+	return buf
+}
+
+// deserializeVector converts bytes back to []float32.
 func deserializeVector(data []byte) ([]float32, error) {
 	if len(data) == 0 {
 		return nil, nil
 	}
-	// Create a Vector and use its DecodeBinary method
-	var v libsqlvector.Vector
-	if err := v.DecodeBinary(data); err != nil {
-		return nil, err
+	if len(data)%4 != 0 {
+		return nil, fmt.Errorf("invalid vector data length: %d", len(data))
 	}
-	return v.Slice(), nil
+	vec := make([]float32, len(data)/4)
+	for i := range vec {
+		vec[i] = math.Float32frombits(binary.LittleEndian.Uint32(data[i*4:]))
+	}
+	return vec, nil
+}
+
+// cosineSimilarity calculates the cosine similarity between two vectors.
+// Returns a value between -1 and 1, where 1 means identical direction.
+func cosineSimilarity(a, b []float32) float64 {
+	if len(a) != len(b) || len(a) == 0 {
+		return 0
+	}
+
+	var dotProduct, normA, normB float64
+	for i := range a {
+		dotProduct += float64(a[i]) * float64(b[i])
+		normA += float64(a[i]) * float64(a[i])
+		normB += float64(b[i]) * float64(b[i])
+	}
+
+	if normA == 0 || normB == 0 {
+		return 0
+	}
+
+	return dotProduct / (math.Sqrt(normA) * math.Sqrt(normB))
 }
 
 // Config holds the database configuration options.
 type Config struct {
-	// Path is the local file path for the database (used for local mode).
+	// Path is the local file path for the database.
 	Path string
-
-	// URL is the Turso remote database URL (used for remote mode).
-	URL string
-
-	// AuthToken is the authentication token for Turso remote connections.
-	AuthToken string
 
 	// MaxOpenConns sets the maximum number of open connections in the pool.
 	MaxOpenConns int
@@ -65,9 +96,6 @@ type Config struct {
 
 	// VectorDimensions specifies the embedding vector size (default: 1536 for OpenAI).
 	VectorDimensions int
-
-	// SyncInterval sets the interval for syncing embedded replicas (remote mode).
-	SyncInterval time.Duration
 }
 
 // DefaultConfig returns a Config with sensible defaults.
@@ -78,22 +106,22 @@ func DefaultConfig() Config {
 		ConnMaxLifetime:  30 * time.Minute,
 		ConnMaxIdleTime:  5 * time.Minute,
 		VectorDimensions: 1536,
-		SyncInterval:     time.Minute,
 	}
 }
 
 // Memory represents a single memory entry in the database.
 type Memory struct {
-	ID        string            `json:"id"`
-	Namespace string            `json:"namespace"`
-	Key       string            `json:"key"`
-	Value     string            `json:"value"`
-	Embedding []float32         `json:"embedding,omitempty"`
-	Metadata  map[string]any    `json:"metadata,omitempty"`
-	CreatedAt time.Time         `json:"created_at"`
-	UpdatedAt time.Time         `json:"updated_at"`
-	TTL       *time.Duration    `json:"ttl,omitempty"`
-	ExpiresAt *time.Time        `json:"expires_at,omitempty"`
+	ID        string         `json:"id"`
+	Namespace string         `json:"namespace"`
+	Key       string         `json:"key"`
+	Value     string         `json:"value"`
+	Embedding []float32      `json:"embedding,omitempty"`
+	Metadata  map[string]any `json:"metadata,omitempty"`
+	Tags      []string       `json:"tags,omitempty"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+	TTL       *time.Duration `json:"ttl,omitempty"`
+	ExpiresAt *time.Time     `json:"expires_at,omitempty"`
 }
 
 // SearchResult represents a memory with its similarity score.
@@ -104,17 +132,15 @@ type SearchResult struct {
 
 // DB is the main database interface for memory operations.
 type DB struct {
-	db         *sql.DB
-	connector  *libsql.Connector
-	config     Config
-	mu         sync.RWMutex
-	closed     bool
-	closeChan  chan struct{}
-	wg         sync.WaitGroup
+	db        *sql.DB
+	config    Config
+	mu        sync.RWMutex
+	closed    bool
+	closeChan chan struct{}
+	wg        sync.WaitGroup
 }
 
 // New creates a new DB instance with the given configuration.
-// It supports both local file-based databases and Turso remote connections.
 func New(ctx context.Context, cfg Config) (*DB, error) {
 	if err := validateConfig(cfg); err != nil {
 		return nil, fmt.Errorf("config validation failed: %w", err)
@@ -123,33 +149,16 @@ func New(ctx context.Context, cfg Config) (*DB, error) {
 	// Apply defaults for unset values
 	cfg = applyDefaults(cfg)
 
-	var (
-		sqlDB     *sql.DB
-		connector *libsql.Connector
-		err       error
-	)
+	// Build connection string based on path type
+	connStr := cfg.Path
+	if !strings.HasPrefix(cfg.Path, "file:") && !strings.HasPrefix(cfg.Path, "http") && cfg.Path != ":memory:" {
+		connStr = "file:" + cfg.Path
+	}
 
-	if cfg.URL != "" {
-		// Remote Turso connection with embedded replica
-		connector, err = libsql.NewEmbeddedReplicaConnector(
-			cfg.Path,
-			cfg.URL,
-			libsql.WithAuthToken(cfg.AuthToken),
-			libsql.WithSyncInterval(cfg.SyncInterval),
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create embedded replica connector: %w", err)
-		}
-		sqlDB = sql.OpenDB(connector)
-	} else if cfg.Path != "" {
-		// Local file-based connection
-		connector, err = libsql.NewEmbeddedReplicaConnector(cfg.Path, "")
-		if err != nil {
-			return nil, fmt.Errorf("failed to create local connector: %w", err)
-		}
-		sqlDB = sql.OpenDB(connector)
-	} else {
-		return nil, ErrInvalidConfig
+	// Open LibSQL database
+	sqlDB, err := sql.Open("libsql", connStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
 	// Configure connection pool
@@ -158,18 +167,32 @@ func New(ctx context.Context, cfg Config) (*DB, error) {
 	sqlDB.SetConnMaxLifetime(cfg.ConnMaxLifetime)
 	sqlDB.SetConnMaxIdleTime(cfg.ConnMaxIdleTime)
 
+	// Enable WAL mode for better concurrent access
+	// Use QueryRowContext since PRAGMA returns a row
+	var journalMode string
+	if err := sqlDB.QueryRowContext(ctx, "PRAGMA journal_mode=WAL").Scan(&journalMode); err != nil {
+		sqlDB.Close()
+		return nil, fmt.Errorf("failed to enable WAL mode: %w", err)
+	}
+
+	// Enable foreign keys
+	var fkEnabled int
+	if err := sqlDB.QueryRowContext(ctx, "PRAGMA foreign_keys=ON").Scan(&fkEnabled); err != nil {
+		// foreign_keys pragma might not return a value, try without scan
+		if _, err := sqlDB.ExecContext(ctx, "PRAGMA foreign_keys=ON"); err != nil {
+			sqlDB.Close()
+			return nil, fmt.Errorf("failed to enable foreign keys: %w", err)
+		}
+	}
+
 	// Verify connection
 	if err := sqlDB.PingContext(ctx); err != nil {
 		sqlDB.Close()
-		if connector != nil {
-			connector.Close()
-		}
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
 	d := &DB{
 		db:        sqlDB,
-		connector: connector,
 		config:    cfg,
 		closeChan: make(chan struct{}),
 	}
@@ -188,14 +211,11 @@ func New(ctx context.Context, cfg Config) (*DB, error) {
 
 // validateConfig validates the database configuration.
 func validateConfig(cfg Config) error {
-	if cfg.Path == "" && cfg.URL == "" {
-		return fmt.Errorf("%w: either Path or URL must be specified", ErrInvalidConfig)
+	if cfg.Path == "" {
+		return fmt.Errorf("%w: Path must be specified", ErrInvalidConfig)
 	}
-	if cfg.URL != "" && cfg.AuthToken == "" {
-		return fmt.Errorf("%w: AuthToken required for remote connections", ErrInvalidConfig)
-	}
-	if cfg.VectorDimensions <= 0 {
-		return fmt.Errorf("%w: VectorDimensions must be positive", ErrInvalidConfig)
+	if cfg.VectorDimensions < 0 {
+		return fmt.Errorf("%w: VectorDimensions must be non-negative", ErrInvalidConfig)
 	}
 	return nil
 }
@@ -218,45 +238,34 @@ func applyDefaults(cfg Config) Config {
 	if cfg.VectorDimensions == 0 {
 		cfg.VectorDimensions = defaults.VectorDimensions
 	}
-	if cfg.SyncInterval == 0 {
-		cfg.SyncInterval = defaults.SyncInterval
-	}
 	return cfg
 }
 
 // initSchema creates the necessary tables and indices.
 func (d *DB) initSchema(ctx context.Context) error {
-	// Create memories table with vector support
-	createTableSQL := fmt.Sprintf(`
+	// Create memories table - vectors stored as BLOB
+	createTableSQL := `
 		CREATE TABLE IF NOT EXISTS memories (
 			id TEXT PRIMARY KEY,
 			namespace TEXT NOT NULL DEFAULT 'default',
 			key TEXT NOT NULL,
 			value TEXT NOT NULL,
-			embedding F32_BLOB(%d),
+			embedding BLOB,
 			metadata TEXT DEFAULT '{}',
+			tags TEXT DEFAULT '[]',
 			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			ttl INTEGER,
 			expires_at DATETIME,
 			UNIQUE(namespace, key)
 		)
-	`, d.config.VectorDimensions)
+	`
 
 	if _, err := d.db.ExecContext(ctx, createTableSQL); err != nil {
 		return fmt.Errorf("failed to create memories table: %w", err)
 	}
 
-	// Create vector index for similarity search using cosine metric
-	createVectorIndexSQL := `
-		CREATE INDEX IF NOT EXISTS memories_embedding_idx
-		ON memories(libsql_vector_idx(embedding, 'metric=cosine'))
-	`
-	if _, err := d.db.ExecContext(ctx, createVectorIndexSQL); err != nil {
-		return fmt.Errorf("failed to create vector index: %w", err)
-	}
-
-	// Create additional indices for efficient queries
+	// Create indices for efficient queries
 	indices := []string{
 		`CREATE INDEX IF NOT EXISTS idx_memories_namespace ON memories(namespace)`,
 		`CREATE INDEX IF NOT EXISTS idx_memories_namespace_key ON memories(namespace, key)`,
@@ -323,7 +332,7 @@ func (d *DB) Store(ctx context.Context, m *Memory) error {
 	}
 
 	// Validate embedding dimensions if provided
-	if m.Embedding != nil && len(m.Embedding) != d.config.VectorDimensions {
+	if m.Embedding != nil && d.config.VectorDimensions > 0 && len(m.Embedding) != d.config.VectorDimensions {
 		return fmt.Errorf("%w: expected %d, got %d", ErrInvalidVector, d.config.VectorDimensions, len(m.Embedding))
 	}
 
@@ -331,6 +340,12 @@ func (d *DB) Store(ctx context.Context, m *Memory) error {
 	metadataJSON, err := json.Marshal(m.Metadata)
 	if err != nil {
 		return fmt.Errorf("failed to marshal metadata: %w", err)
+	}
+
+	// Marshal tags to JSON
+	tagsJSON, err := json.Marshal(m.Tags)
+	if err != nil {
+		return fmt.Errorf("failed to marshal tags: %w", err)
 	}
 
 	// Calculate expires_at from TTL if provided
@@ -345,19 +360,17 @@ func (d *DB) Store(ctx context.Context, m *Memory) error {
 		m.ID = generateID()
 	}
 
-	// Convert embedding to vector format for LibSQL
-	var embeddingValue any
-	if m.Embedding != nil {
-		embeddingValue = libsqlvector.NewVector(m.Embedding)
-	}
+	// Serialize embedding to binary
+	embeddingBlob := serializeVector(m.Embedding)
 
 	query := `
-		INSERT INTO memories (id, namespace, key, value, embedding, metadata, created_at, updated_at, ttl, expires_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO memories (id, namespace, key, value, embedding, metadata, tags, created_at, updated_at, ttl, expires_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(namespace, key) DO UPDATE SET
 			value = excluded.value,
 			embedding = excluded.embedding,
 			metadata = excluded.metadata,
+			tags = excluded.tags,
 			updated_at = excluded.updated_at,
 			ttl = excluded.ttl,
 			expires_at = excluded.expires_at
@@ -374,8 +387,9 @@ func (d *DB) Store(ctx context.Context, m *Memory) error {
 		m.Namespace,
 		m.Key,
 		m.Value,
-		embeddingValue,
+		embeddingBlob,
 		string(metadataJSON),
+		string(tagsJSON),
 		now,
 		now,
 		ttlSeconds,
@@ -403,7 +417,7 @@ func (d *DB) Retrieve(ctx context.Context, namespace, key string) (*Memory, erro
 	}
 
 	query := `
-		SELECT id, namespace, key, value, embedding, metadata, created_at, updated_at, ttl, expires_at
+		SELECT id, namespace, key, value, embedding, metadata, tags, created_at, updated_at, ttl, expires_at
 		FROM memories
 		WHERE namespace = ? AND key = ?
 		AND (expires_at IS NULL OR expires_at > datetime('now'))
@@ -424,7 +438,7 @@ func (d *DB) RetrieveByID(ctx context.Context, id string) (*Memory, error) {
 	}
 
 	query := `
-		SELECT id, namespace, key, value, embedding, metadata, created_at, updated_at, ttl, expires_at
+		SELECT id, namespace, key, value, embedding, metadata, tags, created_at, updated_at, ttl, expires_at
 		FROM memories
 		WHERE id = ?
 		AND (expires_at IS NULL OR expires_at > datetime('now'))
@@ -438,6 +452,7 @@ func (d *DB) RetrieveByID(ctx context.Context, id string) (*Memory, error) {
 func (d *DB) scanMemory(row *sql.Row) (*Memory, error) {
 	var m Memory
 	var metadataJSON string
+	var tagsJSON string
 	var embeddingBlob []byte
 	var ttlSeconds sql.NullInt64
 
@@ -448,6 +463,7 @@ func (d *DB) scanMemory(row *sql.Row) (*Memory, error) {
 		&m.Value,
 		&embeddingBlob,
 		&metadataJSON,
+		&tagsJSON,
 		&m.CreatedAt,
 		&m.UpdatedAt,
 		&ttlSeconds,
@@ -464,6 +480,13 @@ func (d *DB) scanMemory(row *sql.Row) (*Memory, error) {
 	if metadataJSON != "" && metadataJSON != "{}" {
 		if err := json.Unmarshal([]byte(metadataJSON), &m.Metadata); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
+		}
+	}
+
+	// Parse tags JSON
+	if tagsJSON != "" && tagsJSON != "[]" {
+		if err := json.Unmarshal([]byte(tagsJSON), &m.Tags); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal tags: %w", err)
 		}
 	}
 
@@ -559,7 +582,7 @@ func (d *DB) List(ctx context.Context, namespace string, limit, offset int) ([]*
 	}
 
 	query := `
-		SELECT id, namespace, key, value, embedding, metadata, created_at, updated_at, ttl, expires_at
+		SELECT id, namespace, key, value, embedding, metadata, tags, created_at, updated_at, ttl, expires_at
 		FROM memories
 		WHERE namespace = ?
 		AND (expires_at IS NULL OR expires_at > datetime('now'))
@@ -583,6 +606,7 @@ func (d *DB) scanMemories(rows *sql.Rows) ([]*Memory, error) {
 	for rows.Next() {
 		var m Memory
 		var metadataJSON string
+		var tagsJSON string
 		var embeddingBlob []byte
 		var ttlSeconds sql.NullInt64
 
@@ -593,6 +617,7 @@ func (d *DB) scanMemories(rows *sql.Rows) ([]*Memory, error) {
 			&m.Value,
 			&embeddingBlob,
 			&metadataJSON,
+			&tagsJSON,
 			&m.CreatedAt,
 			&m.UpdatedAt,
 			&ttlSeconds,
@@ -606,6 +631,13 @@ func (d *DB) scanMemories(rows *sql.Rows) ([]*Memory, error) {
 		if metadataJSON != "" && metadataJSON != "{}" {
 			if err := json.Unmarshal([]byte(metadataJSON), &m.Metadata); err != nil {
 				return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
+			}
+		}
+
+		// Parse tags JSON
+		if tagsJSON != "" && tagsJSON != "[]" {
+			if err := json.Unmarshal([]byte(tagsJSON), &m.Tags); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal tags: %w", err)
 			}
 		}
 
@@ -634,7 +666,8 @@ func (d *DB) scanMemories(rows *sql.Rows) ([]*Memory, error) {
 	return memories, nil
 }
 
-// Search performs a vector similarity search using cosine distance.
+// Search performs a vector similarity search using cosine similarity.
+// Similarity is calculated in Go after fetching candidates from the database.
 func (d *DB) Search(ctx context.Context, namespace string, queryEmbedding []float32, limit int, threshold float64) ([]SearchResult, error) {
 	if err := d.checkClosed(); err != nil {
 		return nil, err
@@ -644,7 +677,7 @@ func (d *DB) Search(ctx context.Context, namespace string, queryEmbedding []floa
 		return nil, fmt.Errorf("%w: %v", ErrContextClosed, err)
 	}
 
-	if len(queryEmbedding) != d.config.VectorDimensions {
+	if d.config.VectorDimensions > 0 && len(queryEmbedding) != d.config.VectorDimensions {
 		return nil, fmt.Errorf("%w: expected %d, got %d", ErrInvalidVector, d.config.VectorDimensions, len(queryEmbedding))
 	}
 
@@ -655,88 +688,50 @@ func (d *DB) Search(ctx context.Context, namespace string, queryEmbedding []floa
 		threshold = 0.7
 	}
 
-	// Use LibSQL's vector_distance_cos function for cosine similarity
+	// Fetch all memories with embeddings in the namespace
 	query := `
-		SELECT
-			id, namespace, key, value, embedding, metadata,
-			created_at, updated_at, ttl, expires_at,
-			1 - vector_distance_cos(embedding, ?) as similarity
+		SELECT id, namespace, key, value, embedding, metadata, tags, created_at, updated_at, ttl, expires_at
 		FROM memories
 		WHERE namespace = ?
 		AND embedding IS NOT NULL
 		AND (expires_at IS NULL OR expires_at > datetime('now'))
-		ORDER BY vector_distance_cos(embedding, ?) ASC
-		LIMIT ?
 	`
 
-	queryVec := libsqlvector.NewVector(queryEmbedding)
-
-	rows, err := d.db.QueryContext(ctx, query, queryVec, namespace, queryVec, limit)
+	rows, err := d.db.QueryContext(ctx, query, namespace)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute search query: %w", err)
 	}
 	defer rows.Close()
 
+	memories, err := d.scanMemories(rows)
+	if err != nil {
+		return nil, err
+	}
+
+	// Calculate similarity for each memory
 	var results []SearchResult
-
-	for rows.Next() {
-		var m Memory
-		var metadataJSON string
-		var embeddingBlob []byte
-		var ttlSeconds sql.NullInt64
-		var similarity float64
-
-		err := rows.Scan(
-			&m.ID,
-			&m.Namespace,
-			&m.Key,
-			&m.Value,
-			&embeddingBlob,
-			&metadataJSON,
-			&m.CreatedAt,
-			&m.UpdatedAt,
-			&ttlSeconds,
-			&m.ExpiresAt,
-			&similarity,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan search result: %w", err)
-		}
-
-		// Filter by threshold
-		if similarity < threshold {
+	for _, m := range memories {
+		if m.Embedding == nil {
 			continue
 		}
 
-		// Parse metadata JSON
-		if metadataJSON != "" && metadataJSON != "{}" {
-			if err := json.Unmarshal([]byte(metadataJSON), &m.Metadata); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
-			}
+		similarity := cosineSimilarity(queryEmbedding, m.Embedding)
+		if similarity >= threshold {
+			results = append(results, SearchResult{
+				Memory:     *m,
+				Similarity: similarity,
+			})
 		}
-
-		// Parse embedding if present
-		if len(embeddingBlob) > 0 {
-			m.Embedding, err = deserializeVector(embeddingBlob)
-			if err != nil {
-				return nil, fmt.Errorf("failed to deserialize embedding: %w", err)
-			}
-		}
-
-		// Convert TTL seconds back to duration
-		if ttlSeconds.Valid {
-			ttl := time.Duration(ttlSeconds.Int64) * time.Second
-			m.TTL = &ttl
-		}
-
-		results = append(results, SearchResult{
-			Memory:     m,
-			Similarity: similarity,
-		})
 	}
 
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating search results: %w", err)
+	// Sort by similarity (descending)
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Similarity > results[j].Similarity
+	})
+
+	// Apply limit
+	if len(results) > limit {
+		results = results[:limit]
 	}
 
 	return results, nil
@@ -752,7 +747,7 @@ func (d *DB) SearchAll(ctx context.Context, queryEmbedding []float32, limit int,
 		return nil, fmt.Errorf("%w: %v", ErrContextClosed, err)
 	}
 
-	if len(queryEmbedding) != d.config.VectorDimensions {
+	if d.config.VectorDimensions > 0 && len(queryEmbedding) != d.config.VectorDimensions {
 		return nil, fmt.Errorf("%w: expected %d, got %d", ErrInvalidVector, d.config.VectorDimensions, len(queryEmbedding))
 	}
 
@@ -763,86 +758,49 @@ func (d *DB) SearchAll(ctx context.Context, queryEmbedding []float32, limit int,
 		threshold = 0.7
 	}
 
+	// Fetch all memories with embeddings
 	query := `
-		SELECT
-			id, namespace, key, value, embedding, metadata,
-			created_at, updated_at, ttl, expires_at,
-			1 - vector_distance_cos(embedding, ?) as similarity
+		SELECT id, namespace, key, value, embedding, metadata, tags, created_at, updated_at, ttl, expires_at
 		FROM memories
 		WHERE embedding IS NOT NULL
 		AND (expires_at IS NULL OR expires_at > datetime('now'))
-		ORDER BY vector_distance_cos(embedding, ?) ASC
-		LIMIT ?
 	`
 
-	queryVec := libsqlvector.NewVector(queryEmbedding)
-
-	rows, err := d.db.QueryContext(ctx, query, queryVec, queryVec, limit)
+	rows, err := d.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute search query: %w", err)
 	}
 	defer rows.Close()
 
+	memories, err := d.scanMemories(rows)
+	if err != nil {
+		return nil, err
+	}
+
+	// Calculate similarity for each memory
 	var results []SearchResult
-
-	for rows.Next() {
-		var m Memory
-		var metadataJSON string
-		var embeddingBlob []byte
-		var ttlSeconds sql.NullInt64
-		var similarity float64
-
-		err := rows.Scan(
-			&m.ID,
-			&m.Namespace,
-			&m.Key,
-			&m.Value,
-			&embeddingBlob,
-			&metadataJSON,
-			&m.CreatedAt,
-			&m.UpdatedAt,
-			&ttlSeconds,
-			&m.ExpiresAt,
-			&similarity,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan search result: %w", err)
-		}
-
-		// Filter by threshold
-		if similarity < threshold {
+	for _, m := range memories {
+		if m.Embedding == nil {
 			continue
 		}
 
-		// Parse metadata JSON
-		if metadataJSON != "" && metadataJSON != "{}" {
-			if err := json.Unmarshal([]byte(metadataJSON), &m.Metadata); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
-			}
+		similarity := cosineSimilarity(queryEmbedding, m.Embedding)
+		if similarity >= threshold {
+			results = append(results, SearchResult{
+				Memory:     *m,
+				Similarity: similarity,
+			})
 		}
-
-		// Parse embedding if present
-		if len(embeddingBlob) > 0 {
-			m.Embedding, err = deserializeVector(embeddingBlob)
-			if err != nil {
-				return nil, fmt.Errorf("failed to deserialize embedding: %w", err)
-			}
-		}
-
-		// Convert TTL seconds back to duration
-		if ttlSeconds.Valid {
-			ttl := time.Duration(ttlSeconds.Int64) * time.Second
-			m.TTL = &ttl
-		}
-
-		results = append(results, SearchResult{
-			Memory:     m,
-			Similarity: similarity,
-		})
 	}
 
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating search results: %w", err)
+	// Sort by similarity (descending)
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Similarity > results[j].Similarity
+	})
+
+	// Apply limit
+	if len(results) > limit {
+		results = results[:limit]
 	}
 
 	return results, nil
@@ -941,40 +899,14 @@ func (d *DB) DeleteNamespace(ctx context.Context, namespace string) (int64, erro
 	return result.RowsAffected()
 }
 
-// SyncResult contains information about a sync operation.
-type SyncResult struct {
-	FrameNo      int `json:"frame_no"`
-	FramesSynced int `json:"frames_synced"`
-}
-
-// Sync manually triggers a sync with the remote database (for embedded replicas).
-func (d *DB) Sync(ctx context.Context) (*SyncResult, error) {
-	if err := d.checkClosed(); err != nil {
-		return nil, err
-	}
-
-	if d.connector != nil {
-		replicated, err := d.connector.Sync()
-		if err != nil {
-			return nil, fmt.Errorf("failed to sync with remote: %w", err)
-		}
-		return &SyncResult{
-			FrameNo:      replicated.FrameNo,
-			FramesSynced: replicated.FramesSynced,
-		}, nil
-	}
-
-	return nil, nil
-}
-
 // Stats returns database statistics.
 type Stats struct {
-	TotalMemories    int64          `json:"total_memories"`
-	NamespaceCounts  map[string]int64 `json:"namespace_counts"`
-	OldestMemory     *time.Time     `json:"oldest_memory,omitempty"`
-	NewestMemory     *time.Time     `json:"newest_memory,omitempty"`
-	ExpiringCount    int64          `json:"expiring_count"`
-	PoolStats        sql.DBStats    `json:"pool_stats"`
+	TotalMemories   int64            `json:"total_memories"`
+	NamespaceCounts map[string]int64 `json:"namespace_counts"`
+	OldestMemory    *time.Time       `json:"oldest_memory,omitempty"`
+	NewestMemory    *time.Time       `json:"newest_memory,omitempty"`
+	ExpiringCount   int64            `json:"expiring_count"`
+	PoolStats       sql.DBStats      `json:"pool_stats"`
 }
 
 // GetStats returns statistics about the database.
@@ -1066,20 +998,8 @@ func (d *DB) Close() error {
 	d.wg.Wait()
 
 	// Close database connection
-	var errs []error
-
 	if err := d.db.Close(); err != nil {
-		errs = append(errs, fmt.Errorf("failed to close database: %w", err))
-	}
-
-	if d.connector != nil {
-		if err := d.connector.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("failed to close connector: %w", err))
-		}
-	}
-
-	if len(errs) > 0 {
-		return errors.Join(errs...)
+		return fmt.Errorf("failed to close database: %w", err)
 	}
 
 	return nil
@@ -1137,7 +1057,7 @@ func (t *Tx) StoreTx(ctx context.Context, m *Memory) error {
 	}
 
 	// Validate embedding dimensions if provided
-	if m.Embedding != nil && len(m.Embedding) != t.db.config.VectorDimensions {
+	if m.Embedding != nil && t.db.config.VectorDimensions > 0 && len(m.Embedding) != t.db.config.VectorDimensions {
 		return fmt.Errorf("%w: expected %d, got %d", ErrInvalidVector, t.db.config.VectorDimensions, len(m.Embedding))
 	}
 
@@ -1145,6 +1065,12 @@ func (t *Tx) StoreTx(ctx context.Context, m *Memory) error {
 	metadataJSON, err := json.Marshal(m.Metadata)
 	if err != nil {
 		return fmt.Errorf("failed to marshal metadata: %w", err)
+	}
+
+	// Marshal tags to JSON
+	tagsJSON, err := json.Marshal(m.Tags)
+	if err != nil {
+		return fmt.Errorf("failed to marshal tags: %w", err)
 	}
 
 	// Calculate expires_at from TTL if provided
@@ -1159,19 +1085,17 @@ func (t *Tx) StoreTx(ctx context.Context, m *Memory) error {
 		m.ID = generateID()
 	}
 
-	// Convert embedding to vector format
-	var embeddingValue any
-	if m.Embedding != nil {
-		embeddingValue = libsqlvector.NewVector(m.Embedding)
-	}
+	// Serialize embedding to binary
+	embeddingBlob := serializeVector(m.Embedding)
 
 	query := `
-		INSERT INTO memories (id, namespace, key, value, embedding, metadata, created_at, updated_at, ttl, expires_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO memories (id, namespace, key, value, embedding, metadata, tags, created_at, updated_at, ttl, expires_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(namespace, key) DO UPDATE SET
 			value = excluded.value,
 			embedding = excluded.embedding,
 			metadata = excluded.metadata,
+			tags = excluded.tags,
 			updated_at = excluded.updated_at,
 			ttl = excluded.ttl,
 			expires_at = excluded.expires_at
@@ -1188,8 +1112,9 @@ func (t *Tx) StoreTx(ctx context.Context, m *Memory) error {
 		m.Namespace,
 		m.Key,
 		m.Value,
-		embeddingValue,
+		embeddingBlob,
 		string(metadataJSON),
+		string(tagsJSON),
 		now,
 		now,
 		ttlSeconds,
@@ -1231,4 +1156,3 @@ func (t *Tx) DeleteTx(ctx context.Context, namespace, key string) error {
 
 	return nil
 }
-
