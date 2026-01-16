@@ -1,6 +1,7 @@
 // Package embedding provides vector embedding generation and similarity search
 // for the Claude memory plugin. It supports multiple embedding backends including
-// OpenAI's text-embedding-3-small and a local TF-IDF/hash-based fallback.
+// Nomic's text-embedding-qwen3-embedding-8b, OpenAI's text-embedding-3-small,
+// and a local TF-IDF/hash-based fallback.
 package embedding
 
 import (
