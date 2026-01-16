@@ -168,7 +168,7 @@ func initEmbedder(cfg *config.Config) (embedding.Embedder, error) {
 		if cfg.EmbeddingDimension > 0 {
 			nomicCfg.Dimension = cfg.EmbeddingDimension
 		}
-		log.Printf("[INFO] Using Nomic model at endpoint: %s", nomicCfg.Endpoint)
+		log.Printf("[INFO] Using Nomic text-embedding-qwen3-embedding-8b model at endpoint: %s", nomicCfg.Endpoint)
 		return embedding.NewNomicEmbedder(nomicCfg)
 	case "local":
 		localCfg := embedding.DefaultLocalConfig()
