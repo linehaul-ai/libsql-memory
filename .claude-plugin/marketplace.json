@@ -1,11 +1,11 @@
 {
-  "name": "linehaulai-claude-marketplace",
+  "name": "libsql-libsql-memory",
   "owner": {
     "name": "fakebizprez",
     "email": "anthony@linehaul.ai"
   },
   "metadata": {
-    "description": "LineHaul AI plugins for Claude Code",
+    "description": "Persistent semantic memory plugin for Claude Code",
     "version": "1.0.0"
   },
   "plugins": [
