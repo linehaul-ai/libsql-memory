@@ -7,9 +7,29 @@
       "allowedTools": ["memory_search", "Glob", "Read"]
     },
     {
+      "event": "UserPromptSubmit",
+      "type": "prompt",
+      "prompt": "Search memory for context relevant to the user's prompt. This enables proactive retrieval of stored knowledge before processing.\n\nGuidelines:\n- Extract 2-3 key technical terms or concepts from the user prompt\n- If the prompt mentions errors/bugs, include 'error solution troubleshooting' in search\n- If the prompt mentions testing, include 'testing patterns' in search\n- If the prompt mentions refactoring, include 'architecture patterns' in search\n\nSkip searching if:\n- The prompt is very short (< 20 chars)\n- The prompt is a meta-command (starts with /)\n- The prompt is a simple greeting or acknowledgment\n\nIf relevant memories are found (similarity > 0.7), briefly summarize them as context. Keep the summary under 500 tokens.\n\nFormat relevant memories as:\n<relevant_memories>\n- [memory summary]\n</relevant_memories>",
+      "allowedTools": ["memory_search"]
+    },
+    {
+      "event": "PreToolUse",
+      "type": "prompt",
+      "matcher": "Write|Edit",
+      "prompt": "Before modifying this file, search memory for any stored patterns, conventions, or notes specific to this file or its package/module.\n\nSearch strategy:\n1. Extract the package/module name from the file path\n2. Identify the file type (e.g., _test.go, .tsx, .py)\n3. Search for patterns related to that context\n\nIf relevant conventions are found, briefly note them to ensure consistency.\n\nFormat as:\n<file_context>\n- [relevant pattern or convention]\n</file_context>\n\nKeep retrieval fast - only search if the file path suggests it's a substantive code file (not config, docs, or generated files).",
+      "allowedTools": ["memory_search"]
+    },
+    {
+      "event": "PostToolUse",
+      "type": "prompt",
+      "matcher": "Write|Edit",
+      "prompt": "After modifying code, evaluate if any patterns or decisions made should be stored for future reference.\n\nConsider storing if:\n- A new architectural pattern was introduced\n- A non-obvious solution was implemented\n- The change establishes a convention for similar code\n- The modification required understanding a tricky part of the codebase\n\nDo NOT store:\n- Trivial changes (typos, simple renames)\n- Information already documented in code comments\n- Temporary or debugging code\n\nIf storing, use the appropriate namespace (project-name/conventions, project-name/architecture, etc.) and include relevant tags.",
+      "allowedTools": ["memory_store"]
+    },
+    {
       "event": "Stop",
       "type": "prompt",
-      "prompt": "Review the conversation that just concluded. If there were important learnings, decisions, architectural choices, or conclusions that would be valuable to remember for future sessions, store them in memory.\n\nConsider storing:\n- Key decisions made and their rationale\n- Important patterns or conventions discovered\n- User preferences expressed\n- Solutions to tricky problems\n\nDo NOT store:\n- Trivial information\n- Temporary debugging steps\n- Information already in the codebase\n\nUse the appropriate namespace based on context (e.g., project name, 'go', 'typescript', etc.)",
+      "prompt": "Review the conversation that just concluded. If there were important learnings, decisions, architectural choices, or conclusions that would be valuable to remember for future sessions, store them in memory.\n\nConsider storing:\n- Key decisions made and their rationale\n- Important patterns or conventions discovered\n- User preferences expressed\n- Solutions to tricky problems\n- Session summary if substantial work was done\n\nDo NOT store:\n- Trivial information\n- Temporary debugging steps\n- Information already in the codebase\n\nUse the appropriate namespace based on context (e.g., project name, 'go', 'typescript', etc.).\n\nIf this was a substantive session (multiple tool uses, complex problem solving), store a brief session summary in the 'sessions' namespace.",
       "allowedTools": ["memory_store"]
     }
   ]

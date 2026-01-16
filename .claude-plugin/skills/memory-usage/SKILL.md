@@ -62,9 +62,49 @@ memory_search(
 )
 ```
 
+## Automated Memory Retrieval
+
+The plugin includes automation hooks that handle memory operations automatically:
+
+### SessionStart
+- Detects project type and loads relevant context
+- Searches memory for stored project preferences and conventions
+- Provides context summary at session start
+
+### UserPromptSubmit
+- Proactively searches memory for context relevant to your query
+- Extracts technical terms and searches for related patterns
+- Injects relevant memories before processing your request
+
+### PreToolUse (Write/Edit)
+- Retrieves file-specific patterns before modifying code
+- Searches for conventions related to the package/module
+- Ensures consistency with established patterns
+
+### PostToolUse (Write/Edit)
+- Evaluates if new patterns or decisions should be stored
+- Automatically captures architectural decisions
+- Stores non-obvious solutions for future reference
+
+### Stop
+- Reviews the session for valuable learnings
+- Stores key decisions, patterns, and user preferences
+- Creates session summaries for complex work
+
+## Namespace Strategy
+
+Organize memories by purpose:
+- `{project}/preferences` - User preferences for this project
+- `{project}/conventions` - Coding patterns and style decisions
+- `{project}/architecture` - Structural decisions and rationale
+- `{project}/errors` - Error patterns and solutions
+- `{project}/sessions` - Session summaries
+- `global` - Cross-project preferences
+
 ## Key Principles
 
 1. **Quality over quantity** - Store meaningful insights, not everything
 2. **Search before storing** - Avoid duplicates
 3. **Use specific namespaces** - Makes retrieval more accurate
 4. **Include context** - Add metadata for better organization
+5. **Trust automation** - Hooks handle routine memory operations

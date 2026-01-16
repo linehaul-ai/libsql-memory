@@ -34,8 +34,14 @@ Provides memory tools:
 - `memory_stats` - Get storage statistics
 
 ### Hooks
-- **SessionStart** - Automatically loads relevant context based on project type
-- **Stop** - Prompts to save important learnings after substantive conversations
+
+| Hook | Purpose |
+|------|---------|
+| **SessionStart** | Loads project context and preferences at session start |
+| **UserPromptSubmit** | Searches memory for context relevant to user queries |
+| **PreToolUse** (Write/Edit) | Retrieves file-specific patterns before code changes |
+| **PostToolUse** (Write/Edit) | Stores architectural decisions and patterns after changes |
+| **Stop** | Saves session summaries and important learnings |
 
 ### Commands
 - `/memory-status` - View memory statistics and recent entries
