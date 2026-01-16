@@ -1,0 +1,12 @@
+{
+  "plugins": [
+    {
+      "name": "libsql-memory",
+      "description": "Persistent semantic memory for Claude Code with vector search",
+      "repository": "https://github.com/linehaul-ai/libsql-memory",
+      "version": "1.0.0",
+      "author": "fakebizprez",
+      "keywords": ["memory", "vector-search", "persistence", "semantic", "libsql"]
+    }
+  ]
+}

@@ -80,6 +80,9 @@
     "handoff@linehaulai-claude-marketplace": true,
     "jutsu-go@linehaulai-claude-marketplace": true,
     "code-review@claude-plugins-official": true,
-    "testcontainers-go@testcontainers-claude-skills": true
+    "plugin-dev@claude-plugins-official": true,
+    "testcontainers-go@testcontainers-claude-skills": true,
+    "tdd-workflows@claude-code-workflows": true,
+    "test-environment-manager@claude-code-plugins-plus": true
   }
 }

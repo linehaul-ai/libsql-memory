@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "libsql-memory": {
+      "command": "bash",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/bin/run.sh"],
+      "env": {
+        "LIBSQL_MEMORY_EMBEDDING_PROVIDER": "${LIBSQL_MEMORY_EMBEDDING_PROVIDER:-nomic}",
+        "LIBSQL_MEMORY_EMBEDDING_ENDPOINT": "${LIBSQL_MEMORY_EMBEDDING_ENDPOINT:-http://192.168.128.10:1234/v1/embeddings}"
+      }
+    }
+  }
+}

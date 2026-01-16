@@ -1,7 +1,12 @@
 {
   "name": "libsql-memory",
   "version": "1.0.0",
-  "description": "Persistent semantic memory for Claude using LibSQL with vector search",
-  "author": "libsql-memory",
-  "repository": "https://github.com/user/libsql-memory"
+  "description": "Persistent semantic memory for Claude Code with vector search",
+  "author": {
+    "name": "fakebizprez",
+    "email": "anthony@linehaul.ai"
+  },
+  "repository": "https://github.com/linehaul-ai/libsql-memory",
+  "license": "MIT",
+  "keywords": ["memory", "vector-search", "persistence", "semantic"]
 }
