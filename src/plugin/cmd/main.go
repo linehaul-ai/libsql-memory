@@ -13,8 +13,8 @@ import (
 	"github.com/libsql-memory/plugin/internal/config"
 	"github.com/libsql-memory/plugin/internal/db"
 	"github.com/libsql-memory/plugin/internal/embedding"
-	"github.com/libsql-memory/plugin/internal/memory"
 	"github.com/libsql-memory/plugin/internal/mcp"
+	"github.com/libsql-memory/plugin/internal/memory"
 )
 
 // Version information (set at build time via ldflags)
@@ -235,16 +235,16 @@ func (a *memoryServiceAdapter) Search(ctx context.Context, args mcp.MemorySearch
 	namespace := args.Namespace
 	// Empty namespace searches all namespaces
 
-	memories, err := a.store.Search(ctx, args.Query, namespace, args.Limit, args.Threshold)
+	searchResults, err := a.store.Search(ctx, args.Query, namespace, args.Limit, args.Threshold)
 	if err != nil {
 		return nil, err
 	}
 
-	results := make([]mcp.SearchResult, len(memories))
-	for i, mem := range memories {
+	results := make([]mcp.SearchResult, len(searchResults))
+	for i, sr := range searchResults {
 		// Convert metadata
 		metadata := make(map[string]string)
-		for k, v := range mem.Metadata {
+		for k, v := range sr.Memory.Metadata {
 			if s, ok := v.(string); ok {
 				metadata[k] = s
 			} else {
@@ -253,12 +253,12 @@ func (a *memoryServiceAdapter) Search(ctx context.Context, args mcp.MemorySearch
 		}
 
 		results[i] = mcp.SearchResult{
-			Key:       mem.Key,
-			Value:     mem.Value,
-			Namespace: mem.Namespace,
+			Key:       sr.Memory.Key,
+			Value:     sr.Memory.Value,
+			Namespace: sr.Memory.Namespace,
 			Metadata:  metadata,
-			Tags:      mem.Tags,
-			Score:     0.0, // Score would be set by search
+			Tags:      sr.Memory.Tags,
+			Score:     sr.Score,
 		}
 	}
 
@@ -318,29 +318,34 @@ func (a *memoryServiceAdapter) Delete(ctx context.Context, args mcp.MemoryDelete
 }
 
 func (a *memoryServiceAdapter) Stats(ctx context.Context, args mcp.MemoryStatsArgs) (*mcp.MemoryStats, error) {
-	// Get total count
-	var totalEntries int64
-	var err error
-
-	if args.Namespace != "" {
-		totalEntries, err = a.store.Count(ctx, args.Namespace)
-	} else {
-		totalEntries, err = a.store.Count(ctx, "")
-	}
+	dbStats, err := a.store.Stats(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	// TODO: Implement full stats with namespace breakdown
-	stats := &mcp.MemoryStats{
-		TotalEntries:    int(totalEntries),
-		TotalNamespaces: 1, // TODO: Count actual namespaces
-		EntriesByNS:     make(map[string]int),
-		StorageBytes:    0, // TODO: Calculate storage
+	entriesByNS := make(map[string]int)
+	for ns, count := range dbStats.NamespaceCounts {
+		entriesByNS[ns] = int(count)
 	}
 
+	stats := &mcp.MemoryStats{
+		TotalEntries:    int(dbStats.TotalMemories),
+		TotalNamespaces: len(dbStats.NamespaceCounts),
+		EntriesByNS:     entriesByNS,
+		StorageBytes:    0,
+	}
+
+	// Filter to specific namespace if requested
 	if args.Namespace != "" {
-		stats.EntriesByNS[args.Namespace] = int(totalEntries)
+		if count, ok := dbStats.NamespaceCounts[args.Namespace]; ok {
+			stats.TotalEntries = int(count)
+			stats.TotalNamespaces = 1
+			stats.EntriesByNS = map[string]int{args.Namespace: int(count)}
+		} else {
+			stats.TotalEntries = 0
+			stats.TotalNamespaces = 0
+			stats.EntriesByNS = map[string]int{}
+		}
 	}
 
 	return stats, nil

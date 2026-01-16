@@ -336,7 +336,7 @@ func TestServer_MemoryRetrieve(t *testing.T) {
 	server := NewServerWithIO(mock, input, output)
 
 	// First store a memory
-	mock.Store(context.Background(), MemoryStoreArgs{
+	_ = mock.Store(context.Background(), MemoryStoreArgs{
 		Key:       "retrieve-key",
 		Value:     "retrieve-value",
 		Namespace: "default",
@@ -385,12 +385,12 @@ func TestServer_MemorySearch(t *testing.T) {
 	server := NewServerWithIO(mock, input, output)
 
 	// Store some memories
-	mock.Store(context.Background(), MemoryStoreArgs{
+	_ = mock.Store(context.Background(), MemoryStoreArgs{
 		Key:       "auth-patterns",
 		Value:     "JWT authentication with refresh tokens",
 		Namespace: "patterns",
 	})
-	mock.Store(context.Background(), MemoryStoreArgs{
+	_ = mock.Store(context.Background(), MemoryStoreArgs{
 		Key:       "db-patterns",
 		Value:     "Database connection pooling best practices",
 		Namespace: "patterns",

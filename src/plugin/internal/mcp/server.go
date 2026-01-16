@@ -367,8 +367,8 @@ func (s *Server) initTools() {
 					},
 					"threshold": {
 						Type:        "number",
-						Description: "Minimum similarity score threshold (0.0 to 1.0, default: 0.0)",
-						Default:     0.0,
+						Description: "Minimum similarity score threshold (0.0 to 1.0, default: 0.7)",
+						Default:     0.7,
 						Minimum:     &minZero,
 						Maximum:     &maxOne,
 					},
@@ -908,31 +908,5 @@ func (s *Server) sendResponse(response Response) {
 	// Write response with newline delimiter
 	if _, err := fmt.Fprintf(s.writer, "%s\n", data); err != nil {
 		s.logger.Printf("Failed to write response: %v", err)
-	}
-}
-
-// sendNotification sends a JSON-RPC notification to the client
-func (s *Server) sendNotification(method string, params interface{}) {
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
-
-	notification := struct {
-		JSONRPC string      `json:"jsonrpc"`
-		Method  string      `json:"method"`
-		Params  interface{} `json:"params,omitempty"`
-	}{
-		JSONRPC: JSONRPCVersion,
-		Method:  method,
-		Params:  params,
-	}
-
-	data, err := json.Marshal(notification)
-	if err != nil {
-		s.logger.Printf("Failed to marshal notification: %v", err)
-		return
-	}
-
-	if _, err := fmt.Fprintf(s.writer, "%s\n", data); err != nil {
-		s.logger.Printf("Failed to write notification: %v", err)
 	}
 }

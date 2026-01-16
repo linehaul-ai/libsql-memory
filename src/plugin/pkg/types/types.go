@@ -33,15 +33,6 @@ type Stats struct {
 	StorageBytes    int64          `json:"storage_bytes"`
 }
 
-// MemoryMetadata contains additional information about a memory entry.
-type MemoryMetadata struct {
-	Source     string            `json:"source,omitempty"`
-	Category   string            `json:"category,omitempty"`
-	Importance float32           `json:"importance,omitempty"`
-	SessionID  string            `json:"session_id,omitempty"`
-	Extra      map[string]string `json:"extra,omitempty"`
-}
-
 // StoreRequest represents a request to store a new memory.
 type StoreRequest struct {
 	Key       string            `json:"key"`
