@@ -17,12 +17,12 @@ import (
 
 // Default configuration values
 const (
-	DefaultEmbeddingDimension      = 768 // Default to Nomic dimension
-	DefaultNamespace               = "default"
-	DefaultMaxConnections          = 10
-	DefaultLogLevel                = "info"
-	DefaultEmbeddingProvider       = "nomic" // Default to local Nomic model
-	DefaultNomicEmbeddingEndpoint  = "http://192.168.128.10:1234/v1/embeddings"
+	DefaultEmbeddingDimension     = 768 // Default to Nomic dimension
+	DefaultNamespace              = "default"
+	DefaultMaxConnections         = 10
+	DefaultLogLevel               = "info"
+	DefaultEmbeddingProvider      = "nomic" // Default to local Nomic model
+	DefaultNomicEmbeddingEndpoint = "http://192.168.128.10:1234/v1/embeddings"
 )
 
 // Environment variable prefix

@@ -67,14 +67,14 @@ func TestNewConfig_WithOptions(t *testing.T) {
 func TestLoadFromEnv(t *testing.T) {
 	// Set environment variables
 	envVars := map[string]string{
-		"LIBSQL_MEMORY_DATABASE_PATH":      "/env/path/db",
-		"LIBSQL_MEMORY_AUTH_TOKEN":         "env-token",
-		"LIBSQL_MEMORY_EMBEDDING_PROVIDER": "local",
-		"LIBSQL_MEMORY_OPENAI_API_KEY":     "sk-env-key",
+		"LIBSQL_MEMORY_DATABASE_PATH":       "/env/path/db",
+		"LIBSQL_MEMORY_AUTH_TOKEN":          "env-token",
+		"LIBSQL_MEMORY_EMBEDDING_PROVIDER":  "local",
+		"LIBSQL_MEMORY_OPENAI_API_KEY":      "sk-env-key",
 		"LIBSQL_MEMORY_EMBEDDING_DIMENSION": "512",
-		"LIBSQL_MEMORY_DEFAULT_NAMESPACE":  "env-ns",
-		"LIBSQL_MEMORY_MAX_CONNECTIONS":    "25",
-		"LIBSQL_MEMORY_LOG_LEVEL":          "warn",
+		"LIBSQL_MEMORY_DEFAULT_NAMESPACE":   "env-ns",
+		"LIBSQL_MEMORY_MAX_CONNECTIONS":     "25",
+		"LIBSQL_MEMORY_LOG_LEVEL":           "warn",
 	}
 
 	for k, v := range envVars {

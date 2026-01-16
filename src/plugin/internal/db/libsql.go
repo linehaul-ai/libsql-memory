@@ -10,12 +10,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"math"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	_ "github.com/tursodatabase/go-libsql" // LibSQL driver
 )
 
@@ -297,10 +299,11 @@ func (d *DB) startTTLCleanup(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if err := d.cleanupExpired(context.Background()); err != nil {
-					// Log error but continue
-					_ = err
+				cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+				if err := d.cleanupExpired(cleanupCtx); err != nil {
+					log.Printf("[WARN] TTL cleanup failed: %v", err)
 				}
+				cleanupCancel()
 			}
 		}
 	}()
@@ -1015,7 +1018,7 @@ func (d *DB) Ping(ctx context.Context) error {
 
 // generateID generates a unique ID for a memory.
 func generateID() string {
-	return fmt.Sprintf("%d-%d", time.Now().UnixNano(), time.Now().UnixNano()%1000000)
+	return uuid.New().String()
 }
 
 // Transaction support

@@ -25,14 +25,14 @@ import (
 
 // Common errors returned by embedding operations.
 var (
-	ErrEmptyText          = errors.New("embedding: text cannot be empty")
-	ErrDimensionMismatch  = errors.New("embedding: vector dimension mismatch")
-	ErrRateLimited        = errors.New("embedding: rate limit exceeded")
-	ErrAPIKeyMissing      = errors.New("embedding: OpenAI API key is required")
-	ErrAPIRequestFailed   = errors.New("embedding: API request failed")
-	ErrInvalidResponse    = errors.New("embedding: invalid API response")
-	ErrIndexNotFound      = errors.New("embedding: vector index not found")
-	ErrDatabaseError      = errors.New("embedding: database operation failed")
+	ErrEmptyText         = errors.New("embedding: text cannot be empty")
+	ErrDimensionMismatch = errors.New("embedding: vector dimension mismatch")
+	ErrRateLimited       = errors.New("embedding: rate limit exceeded")
+	ErrAPIKeyMissing     = errors.New("embedding: OpenAI API key is required")
+	ErrAPIRequestFailed  = errors.New("embedding: API request failed")
+	ErrInvalidResponse   = errors.New("embedding: invalid API response")
+	ErrIndexNotFound     = errors.New("embedding: vector index not found")
+	ErrDatabaseError     = errors.New("embedding: database operation failed")
 )
 
 // Default configuration values.
@@ -449,18 +449,18 @@ func (e *LocalEmbedder) hashEmbed(text string) Vector {
 
 // OpenAIEmbedder generates embeddings using OpenAI's embedding API.
 type OpenAIEmbedder struct {
-	config     EmbedderConfig
-	httpClient *http.Client
+	config      EmbedderConfig
+	httpClient  *http.Client
 	rateLimiter *rateLimiter
 }
 
 // rateLimiter implements a simple token bucket rate limiter.
 type rateLimiter struct {
-	mu           sync.Mutex
-	tokens       float64
-	maxTokens    float64
-	refillRate   float64 // tokens per second
-	lastRefill   time.Time
+	mu         sync.Mutex
+	tokens     float64
+	maxTokens  float64
+	refillRate float64 // tokens per second
+	lastRefill time.Time
 }
 
 // newRateLimiter creates a rate limiter for the given requests per minute.

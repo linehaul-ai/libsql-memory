@@ -1,0 +1,7 @@
+{
+  "name": "libsql-memory",
+  "version": "1.0.0",
+  "description": "Persistent semantic memory for Claude using LibSQL with vector search",
+  "author": "libsql-memory",
+  "repository": "https://github.com/user/libsql-memory"
+}

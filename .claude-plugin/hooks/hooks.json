@@ -1,0 +1,16 @@
+{
+  "hooks": [
+    {
+      "event": "SessionStart",
+      "type": "prompt",
+      "prompt": "Analyze the current working directory to understand the project context.\n\n1. Detect project type by checking for key files:\n   - Go: look for go.mod, *.go files\n   - TypeScript/JS: look for package.json, tsconfig.json\n   - Python: look for requirements.txt, pyproject.toml, *.py\n   - Rust: look for Cargo.toml\n\n2. Based on detected project type, use Glob to find the most relevant source files (limit to key files, don't read everything)\n\n3. Search memory for any stored context about this project or similar work\n\n4. Provide a brief summary of available context to inform the session",
+      "allowedTools": ["memory_search", "Glob", "Read"]
+    },
+    {
+      "event": "Stop",
+      "type": "prompt",
+      "prompt": "Review the conversation that just concluded. If there were important learnings, decisions, architectural choices, or conclusions that would be valuable to remember for future sessions, store them in memory.\n\nConsider storing:\n- Key decisions made and their rationale\n- Important patterns or conventions discovered\n- User preferences expressed\n- Solutions to tricky problems\n\nDo NOT store:\n- Trivial information\n- Temporary debugging steps\n- Information already in the codebase\n\nUse the appropriate namespace based on context (e.g., project name, 'go', 'typescript', etc.)",
+      "allowedTools": ["memory_store"]
+    }
+  ]
+}

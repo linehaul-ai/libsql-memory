@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -40,6 +41,12 @@ type Memory struct {
 	UpdatedAt time.Time      `json:"updated_at"`
 	TTL       *time.Duration `json:"ttl,omitempty"`
 	Tags      []string       `json:"tags,omitempty"`
+}
+
+// SearchResult represents a memory with its similarity score.
+type SearchResult struct {
+	Memory *Memory `json:"memory"`
+	Score  float64 `json:"score"`
 }
 
 // IsExpired checks if the memory has exceeded its TTL.
@@ -104,8 +111,8 @@ type MemoryStore interface {
 	// List returns memory entries in a namespace, up to the specified limit.
 	List(ctx context.Context, namespace string, limit int) ([]*Memory, error)
 
-	// Search performs a semantic search using embeddings and returns matching memories.
-	Search(ctx context.Context, query string, namespace string, limit int, threshold float64) ([]*Memory, error)
+	// Search performs a semantic search using embeddings and returns matching memories with scores.
+	Search(ctx context.Context, query string, namespace string, limit int, threshold float64) ([]SearchResult, error)
 
 	// Close releases any resources held by the store.
 	Close() error
@@ -146,7 +153,7 @@ func WithEmbedding(emb []float32) StoreOption {
 type Store struct {
 	database *db.DB
 	embedder embedding.Embedder
-	closed   bool
+	closed   atomic.Bool
 }
 
 // NewStore creates a new memory store with the given database connection and embedder.
@@ -159,7 +166,7 @@ func NewStore(database *db.DB, embedder embedding.Embedder) *Store {
 
 // Store saves a memory entry to the database.
 func (s *Store) Store(ctx context.Context, namespace, key, value string, metadata map[string]any, opts ...StoreOption) error {
-	if s.closed {
+	if s.closed.Load() {
 		return ErrStoreClosed
 	}
 
@@ -218,7 +225,7 @@ func (s *Store) Store(ctx context.Context, namespace, key, value string, metadat
 
 // Retrieve fetches a memory entry by namespace and key.
 func (s *Store) Retrieve(ctx context.Context, namespace, key string) (*Memory, error) {
-	if s.closed {
+	if s.closed.Load() {
 		return nil, ErrStoreClosed
 	}
 
@@ -242,7 +249,7 @@ func (s *Store) Retrieve(ctx context.Context, namespace, key string) (*Memory, e
 
 // Delete removes a memory entry by namespace and key.
 func (s *Store) Delete(ctx context.Context, namespace, key string) error {
-	if s.closed {
+	if s.closed.Load() {
 		return ErrStoreClosed
 	}
 
@@ -265,7 +272,7 @@ func (s *Store) Delete(ctx context.Context, namespace, key string) error {
 
 // List returns memory entries in a namespace, ordered by creation time descending.
 func (s *Store) List(ctx context.Context, namespace string, limit int) ([]*Memory, error) {
-	if s.closed {
+	if s.closed.Load() {
 		return nil, ErrStoreClosed
 	}
 
@@ -294,8 +301,8 @@ func (s *Store) List(ctx context.Context, namespace string, limit int) ([]*Memor
 }
 
 // Search performs a semantic search using embeddings.
-func (s *Store) Search(ctx context.Context, query string, namespace string, limit int, threshold float64) ([]*Memory, error) {
-	if s.closed {
+func (s *Store) Search(ctx context.Context, query string, namespace string, limit int, threshold float64) ([]SearchResult, error) {
+	if s.closed.Load() {
 		return nil, ErrStoreClosed
 	}
 
@@ -333,28 +340,30 @@ func (s *Store) Search(ctx context.Context, query string, namespace string, limi
 	}
 
 	// Use namespace search if specified, otherwise search all
-	var results []db.SearchResult
+	var dbResults []db.SearchResult
 	if namespace != "" {
-		results, err = s.database.Search(ctx, namespace, []float32(queryVec), limit, threshold)
+		dbResults, err = s.database.Search(ctx, namespace, []float32(queryVec), limit, threshold)
 	} else {
-		results, err = s.database.SearchAll(ctx, []float32(queryVec), limit, threshold)
+		dbResults, err = s.database.SearchAll(ctx, []float32(queryVec), limit, threshold)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to search memories: %w", err)
 	}
 
-	memories := make([]*Memory, 0, len(results))
-	for _, r := range results {
-		mem := convertDBMemory(&r.Memory)
-		memories = append(memories, mem)
+	results := make([]SearchResult, 0, len(dbResults))
+	for _, r := range dbResults {
+		results = append(results, SearchResult{
+			Memory: convertDBMemory(&r.Memory),
+			Score:  r.Similarity,
+		})
 	}
 
-	return memories, nil
+	return results, nil
 }
 
 // ListByTags returns memories that have all specified tags.
 func (s *Store) ListByTags(ctx context.Context, namespace string, tags []string, limit int) ([]*Memory, error) {
-	if s.closed {
+	if s.closed.Load() {
 		return nil, ErrStoreClosed
 	}
 
@@ -383,7 +392,7 @@ func (s *Store) ListByTags(ctx context.Context, namespace string, tags []string,
 
 // ListByAnyTag returns memories that have any of the specified tags.
 func (s *Store) ListByAnyTag(ctx context.Context, namespace string, tags []string, limit int) ([]*Memory, error) {
-	if s.closed {
+	if s.closed.Load() {
 		return nil, ErrStoreClosed
 	}
 
@@ -411,7 +420,7 @@ func (s *Store) ListByAnyTag(ctx context.Context, namespace string, tags []strin
 
 // DeleteNamespace removes all memories in a namespace.
 func (s *Store) DeleteNamespace(ctx context.Context, namespace string) (int64, error) {
-	if s.closed {
+	if s.closed.Load() {
 		return 0, ErrStoreClosed
 	}
 
@@ -424,7 +433,7 @@ func (s *Store) DeleteNamespace(ctx context.Context, namespace string) (int64, e
 
 // Count returns the number of memories in a namespace.
 func (s *Store) Count(ctx context.Context, namespace string) (int64, error) {
-	if s.closed {
+	if s.closed.Load() {
 		return 0, ErrStoreClosed
 	}
 
@@ -440,7 +449,7 @@ func (s *Store) Count(ctx context.Context, namespace string) (int64, error) {
 
 // ListNamespaces returns all unique namespaces.
 func (s *Store) ListNamespaces(ctx context.Context) ([]string, error) {
-	if s.closed {
+	if s.closed.Load() {
 		return nil, ErrStoreClosed
 	}
 
@@ -449,7 +458,7 @@ func (s *Store) ListNamespaces(ctx context.Context) ([]string, error) {
 
 // Stats returns database statistics.
 func (s *Store) Stats(ctx context.Context) (*db.Stats, error) {
-	if s.closed {
+	if s.closed.Load() {
 		return nil, ErrStoreClosed
 	}
 
@@ -458,11 +467,11 @@ func (s *Store) Stats(ctx context.Context) (*db.Stats, error) {
 
 // Close releases resources held by the store.
 func (s *Store) Close() error {
-	if s.closed {
+	if s.closed.Load() {
 		return ErrStoreClosed
 	}
 
-	s.closed = true
+	s.closed.Store(true)
 
 	var errs []error
 
@@ -555,7 +564,7 @@ func convertDBMemory(dbMem *db.Memory) *Memory {
 
 // BatchStore stores multiple memories in a single transaction.
 func (s *Store) BatchStore(ctx context.Context, memories []*Memory) error {
-	if s.closed {
+	if s.closed.Load() {
 		return ErrStoreClosed
 	}
 
