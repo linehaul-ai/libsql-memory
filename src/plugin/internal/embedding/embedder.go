@@ -39,9 +39,9 @@ var (
 const (
 	DefaultOpenAIDimension = 1536
 	DefaultLocalDimension  = 384
-	DefaultNomicDimension  = 768 // nomic-embed-text-v1.5 outputs 768 dimensions
+	DefaultNomicDimension  = 768 // text-embedding-qwen3-embedding-8b outputs 768 dimensions
 	DefaultOpenAIModel     = "text-embedding-3-small"
-	DefaultNomicModel      = "text-embedding-nomic-embed-text-v1.5@q8_0"
+	DefaultNomicModel      = "text-embedding-qwen3-embedding-8b"
 	DefaultOpenAIEndpoint  = "https://api.openai.com/v1/embeddings"
 	DefaultNomicEndpoint   = "http://192.168.128.10:1234/v1/embeddings"
 	DefaultRequestTimeout  = 30 * time.Second
