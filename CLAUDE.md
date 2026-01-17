@@ -40,7 +40,7 @@ src/plugin/
 ├── internal/
 │   ├── config/             # Configuration (flags, env, files with priority ordering)
 │   ├── db/                 # LibSQL backend with vector storage and cosine similarity search
-│   ├── embedding/          # Embedding providers (Nomic, OpenAI, Local TF-IDF)
+│   ├── embedding/          # Embedding providers (Qwen, OpenAI, Local TF-IDF)
 │   ├── mcp/                # MCP JSON-RPC 2.0 server over stdio
 │   └── memory/             # High-level memory store operations
 └── pkg/types/              # Shared request/response types
