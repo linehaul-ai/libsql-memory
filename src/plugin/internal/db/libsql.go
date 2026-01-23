@@ -319,7 +319,7 @@ func (d *DB) cleanupExpired(ctx context.Context) error {
 	d.mu.RUnlock()
 
 	_, err := d.db.ExecContext(ctx,
-		`DELETE FROM memories WHERE expires_at IS NOT NULL AND expires_at < datetime('now')`,
+		`DELETE FROM memories WHERE expires_at IS NOT NULL AND datetime(expires_at) < datetime('now')`,
 	)
 	return err
 }
@@ -423,7 +423,7 @@ func (d *DB) Retrieve(ctx context.Context, namespace, key string) (*Memory, erro
 		SELECT id, namespace, key, value, embedding, metadata, tags, created_at, updated_at, ttl, expires_at
 		FROM memories
 		WHERE namespace = ? AND key = ?
-		AND (expires_at IS NULL OR expires_at > datetime('now'))
+		AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))
 	`
 
 	row := d.db.QueryRowContext(ctx, query, namespace, key)
@@ -444,7 +444,7 @@ func (d *DB) RetrieveByID(ctx context.Context, id string) (*Memory, error) {
 		SELECT id, namespace, key, value, embedding, metadata, tags, created_at, updated_at, ttl, expires_at
 		FROM memories
 		WHERE id = ?
-		AND (expires_at IS NULL OR expires_at > datetime('now'))
+		AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))
 	`
 
 	row := d.db.QueryRowContext(ctx, query, id)
@@ -588,7 +588,7 @@ func (d *DB) List(ctx context.Context, namespace string, limit, offset int) ([]*
 		SELECT id, namespace, key, value, embedding, metadata, tags, created_at, updated_at, ttl, expires_at
 		FROM memories
 		WHERE namespace = ?
-		AND (expires_at IS NULL OR expires_at > datetime('now'))
+		AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))
 		ORDER BY created_at DESC
 		LIMIT ? OFFSET ?
 	`
@@ -697,7 +697,7 @@ func (d *DB) Search(ctx context.Context, namespace string, queryEmbedding []floa
 		FROM memories
 		WHERE namespace = ?
 		AND embedding IS NOT NULL
-		AND (expires_at IS NULL OR expires_at > datetime('now'))
+		AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))
 	`
 
 	rows, err := d.db.QueryContext(ctx, query, namespace)
@@ -766,7 +766,7 @@ func (d *DB) SearchAll(ctx context.Context, queryEmbedding []float32, limit int,
 		SELECT id, namespace, key, value, embedding, metadata, tags, created_at, updated_at, ttl, expires_at
 		FROM memories
 		WHERE embedding IS NOT NULL
-		AND (expires_at IS NULL OR expires_at > datetime('now'))
+		AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))
 	`
 
 	rows, err := d.db.QueryContext(ctx, query)
@@ -821,7 +821,7 @@ func (d *DB) Count(ctx context.Context, namespace string) (int64, error) {
 
 	var count int64
 	err := d.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM memories WHERE namespace = ? AND (expires_at IS NULL OR expires_at > datetime('now'))`,
+		`SELECT COUNT(*) FROM memories WHERE namespace = ? AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))`,
 		namespace,
 	).Scan(&count)
 	if err != nil {
@@ -843,7 +843,7 @@ func (d *DB) CountAll(ctx context.Context) (int64, error) {
 
 	var count int64
 	err := d.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM memories WHERE expires_at IS NULL OR expires_at > datetime('now')`,
+		`SELECT COUNT(*) FROM memories WHERE expires_at IS NULL OR datetime(expires_at) > datetime('now')`,
 	).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("failed to count memories: %w", err)
