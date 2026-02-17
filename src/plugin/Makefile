@@ -44,17 +44,17 @@ help:
 all: build build-mcp
 
 ## build: Build the main plugin binary
-build: $(BUILD_DIR)
+build:
+	@mkdir -p $(BUILD_DIR)
 	@echo "Building $(BINARY_NAME) $(VERSION)..."
 	$(GO) build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/
 
 ## build-mcp: Build the MCP server binary
-build-mcp: $(BUILD_DIR)
+build-mcp:
+	@mkdir -p $(BUILD_DIR)
 	@echo "Building $(MCP_SERVER_BINARY)..."
 	$(GO) build $(LDFLAGS) -o $(BUILD_DIR)/$(MCP_SERVER_BINARY) ./cmd/mcp-server/
 
-$(BUILD_DIR):
-	mkdir -p $(BUILD_DIR)
 
 ## install: Install binaries to GOBIN
 install:
@@ -79,7 +79,8 @@ test-verbose:
 	$(GO) test -race -cover -v ./...
 
 ## test-coverage: Run tests with coverage report
-test-coverage: $(BUILD_DIR)
+test-coverage:
+	@mkdir -p $(BUILD_DIR)
 	@echo "Running tests with coverage..."
 	$(GO) test -race -coverprofile=$(BUILD_DIR)/coverage.out ./...
 	$(GO) tool cover -html=$(BUILD_DIR)/coverage.out -o $(BUILD_DIR)/coverage.html
@@ -124,7 +125,8 @@ run: build-mcp
 	./$(BUILD_DIR)/$(MCP_SERVER_BINARY)
 
 ## dist: Build distribution binaries for all platforms
-dist: $(DIST_DIR)
+dist:
+	@mkdir -p $(DIST_DIR)
 	@echo "Building distribution binaries..."
 	GOOS=darwin GOARCH=amd64 $(GO) build $(LDFLAGS) -o $(DIST_DIR)/$(BINARY_NAME)-darwin-amd64 ./cmd/
 	GOOS=darwin GOARCH=arm64 $(GO) build $(LDFLAGS) -o $(DIST_DIR)/$(BINARY_NAME)-darwin-arm64 ./cmd/
@@ -133,8 +135,6 @@ dist: $(DIST_DIR)
 	GOOS=windows GOARCH=amd64 $(GO) build $(LDFLAGS) -o $(DIST_DIR)/$(BINARY_NAME)-windows-amd64.exe ./cmd/
 	@echo "Distribution binaries created in $(DIST_DIR)/"
 
-$(DIST_DIR):
-	mkdir -p $(DIST_DIR)
 
 ## docker: Build Docker image
 docker:

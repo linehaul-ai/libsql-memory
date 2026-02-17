@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"testing"
+	"time"
 )
 
 func TestDBOperations(t *testing.T) {
@@ -417,5 +418,76 @@ func TestCount(t *testing.T) {
 
 	if countAll != 5 {
 		t.Errorf("expected 5 total memories, got %d", countAll)
+	}
+}
+
+func TestExpirationBehavior(t *testing.T) {
+	// Create temp database
+	tmpFile, err := os.CreateTemp("", "test-repro-*.db")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	tmpPath := tmpFile.Name()
+	tmpFile.Close()
+	defer os.Remove(tmpPath)
+	defer os.Remove(tmpPath + "-shm")
+	defer os.Remove(tmpPath + "-wal")
+
+	ctx := context.Background()
+
+	// Create DB instance
+	cfg := Config{
+		Path:             tmpPath,
+		VectorDimensions: 384,
+	}
+	db, err := New(ctx, cfg)
+	if err != nil {
+		t.Fatalf("failed to create DB: %v", err)
+	}
+	defer db.Close()
+
+	// Store a memory that has already expired
+	negTTL := -1 * time.Hour
+	mem := &Memory{
+		ID:        "expired-mem",
+		Namespace: "default",
+		Key:       "expired-key",
+		Value:     "This should be expired",
+		TTL:       &negTTL,
+		Embedding: make([]float32, 384),
+	}
+
+	if err := db.Store(ctx, mem); err != nil {
+		t.Fatalf("store failed: %v", err)
+	}
+
+	// Try to Retrieve it. It should NOT be returned.
+	_, err = db.Retrieve(ctx, "default", "expired-key")
+	if err != ErrNotFound {
+		t.Errorf("expected ErrNotFound for expired memory, got: %v", err)
+	}
+
+	// Verify it exists in the DB if we query without expiration check (manual query)
+	var count int
+	err = db.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM memories WHERE key = 'expired-key'").Scan(&count)
+	if err != nil {
+		t.Fatalf("manual count failed: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("memory should exist in DB but be hidden, count: %d", count)
+	}
+
+	// Run cleanup
+	if err := db.cleanupExpired(ctx); err != nil {
+		t.Fatalf("cleanup failed: %v", err)
+	}
+
+	// Verify it is GONE from the DB
+	err = db.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM memories WHERE key = 'expired-key'").Scan(&count)
+	if err != nil {
+		t.Fatalf("manual count failed: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("memory should have been cleaned up, count: %d", count)
 	}
 }
