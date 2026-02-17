@@ -446,48 +446,111 @@ func TestExpirationBehavior(t *testing.T) {
 	}
 	defer db.Close()
 
-	// Store a memory that has already expired
-	negTTL := -1 * time.Hour
-	mem := &Memory{
-		ID:        "expired-mem",
-		Namespace: "default",
-		Key:       "expired-key",
-		Value:     "This should be expired",
-		TTL:       &negTTL,
-		Embedding: make([]float32, 384),
-	}
+	t.Run("AlreadyExpired", func(t *testing.T) {
+		negTTL := -1 * time.Hour
+		mem := &Memory{
+			ID:        "expired-mem",
+			Namespace: "default",
+			Key:       "expired-key",
+			Value:     "This should be expired",
+			TTL:       &negTTL,
+			Embedding: make([]float32, 384),
+		}
 
-	if err := db.Store(ctx, mem); err != nil {
-		t.Fatalf("store failed: %v", err)
-	}
+		if err := db.Store(ctx, mem); err != nil {
+			t.Fatalf("store failed: %v", err)
+		}
 
-	// Try to Retrieve it. It should NOT be returned.
-	_, err = db.Retrieve(ctx, "default", "expired-key")
-	if err != ErrNotFound {
-		t.Errorf("expected ErrNotFound for expired memory, got: %v", err)
-	}
+		// Try to Retrieve it. It should NOT be returned.
+		_, err = db.Retrieve(ctx, "default", "expired-key")
+		if err != ErrNotFound {
+			t.Errorf("expected ErrNotFound for expired memory, got: %v", err)
+		}
 
-	// Verify it exists in the DB if we query without expiration check (manual query)
-	var count int
-	err = db.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM memories WHERE key = 'expired-key'").Scan(&count)
-	if err != nil {
-		t.Fatalf("manual count failed: %v", err)
-	}
-	if count != 1 {
-		t.Errorf("memory should exist in DB but be hidden, count: %d", count)
-	}
+		// Verify it exists in the DB if we query without expiration check (manual query)
+		var count int
+		err = db.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM memories WHERE key = 'expired-key'").Scan(&count)
+		if err != nil {
+			t.Fatalf("manual count failed: %v", err)
+		}
+		if count != 1 {
+			t.Errorf("memory should exist in DB but be hidden, count: %d", count)
+		}
 
-	// Run cleanup
-	if err := db.cleanupExpired(ctx); err != nil {
-		t.Fatalf("cleanup failed: %v", err)
-	}
+		// Run cleanup
+		if err := db.cleanupExpired(ctx); err != nil {
+			t.Fatalf("cleanup failed: %v", err)
+		}
 
-	// Verify it is GONE from the DB
-	err = db.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM memories WHERE key = 'expired-key'").Scan(&count)
-	if err != nil {
-		t.Fatalf("manual count failed: %v", err)
-	}
-	if count != 0 {
-		t.Errorf("memory should have been cleaned up, count: %d", count)
-	}
+		// Verify it is GONE from the DB
+		err = db.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM memories WHERE key = 'expired-key'").Scan(&count)
+		if err != nil {
+			t.Fatalf("manual count failed: %v", err)
+		}
+		if count != 0 {
+			t.Errorf("memory should have been cleaned up, count: %d", count)
+		}
+	})
+
+	t.Run("ImmediateExpiration", func(t *testing.T) {
+		// Test precise expiration boundary (small TTL)
+		// We use a small TTL instead of 0 because 0 might be interpreted as no TTL in some systems (though not this one)
+		// And we sleep to ensure it expires.
+		smallTTL := 10 * time.Millisecond
+		mem := &Memory{
+			ID:        "immediate-mem",
+			Namespace: "default",
+			Key:       "immediate-key",
+			Value:     "This should expire immediately",
+			TTL:       &smallTTL,
+			Embedding: make([]float32, 384),
+		}
+
+		if err := db.Store(ctx, mem); err != nil {
+			t.Fatalf("store failed: %v", err)
+		}
+
+		// Wait for expiration
+		time.Sleep(20 * time.Millisecond)
+
+		// Should be treated as expired
+		_, err = db.Retrieve(ctx, "default", "immediate-key")
+		if err != ErrNotFound {
+			t.Errorf("expected ErrNotFound for expired memory, got: %v", err)
+		}
+	})
+
+	t.Run("FutureExpiration", func(t *testing.T) {
+		// Test memory that expires in the future
+		futureTTL := 1 * time.Hour
+		mem := &Memory{
+			ID:        "future-mem",
+			Namespace: "default",
+			Key:       "future-key",
+			Value:     "This should exist",
+			TTL:       &futureTTL,
+			Embedding: make([]float32, 384),
+		}
+
+		if err := db.Store(ctx, mem); err != nil {
+			t.Fatalf("store failed: %v", err)
+		}
+
+		// Should be retrievable
+		_, err := db.Retrieve(ctx, "default", "future-key")
+		if err != nil {
+			t.Errorf("expected memory to be found, got error: %v", err)
+		}
+
+		// Run cleanup
+		if err := db.cleanupExpired(ctx); err != nil {
+			t.Fatalf("cleanup failed: %v", err)
+		}
+
+		// Should STILL be retrievable
+		_, err = db.Retrieve(ctx, "default", "future-key")
+		if err != nil {
+			t.Errorf("expected memory to persist after cleanup, got error: %v", err)
+		}
+	})
 }
