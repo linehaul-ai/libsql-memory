@@ -3,7 +3,7 @@
 //! `memory-index` will implement this with fff-search. `memory-core` only depends
 //! on the trait so the write-path dedup probe stays best-effort and testable.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::error::Result;
 
@@ -53,6 +53,17 @@ pub enum IndexState {
     Ready,
 }
 
+/// Point-in-time state and live metrics for a retrieval index.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct IndexSnapshot {
+    /// Current readiness.
+    pub state: IndexState,
+    /// Live, non-tombstoned files in the active index.
+    pub files_indexed: u64,
+    /// Wall-clock duration of the most recently completed full scan.
+    pub last_scan_ms: u64,
+}
+
 /// Search backend used by store (dedup) and MCP search tools.
 ///
 /// Implementations must not be required on the write path: callers pass
@@ -61,13 +72,38 @@ pub enum IndexState {
 /// `Send + Sync` so MCP servers can hold `Arc<dyn Retriever>`.
 pub trait Retriever: Send + Sync {
     /// Fuzzy/path search over note paths and slugs (titles become slugs).
-    fn find_files(&self, query: &str, scope: Option<&str>) -> Result<Vec<FileHit>>;
+    fn find_files(
+        &self,
+        query: &str,
+        scope: Option<&str>,
+        include_archived: bool,
+    ) -> Result<Vec<FileHit>>;
 
     /// Content search over note files (frontmatter included).
-    fn grep(&self, query: &str, mode: GrepMode, scope: Option<&str>) -> Result<Vec<ContentHit>>;
+    fn grep(
+        &self,
+        query: &str,
+        mode: GrepMode,
+        scope: Option<&str>,
+        include_archived: bool,
+    ) -> Result<Vec<ContentHit>>;
 
     /// Current index readiness.
     fn index_state(&self) -> IndexState;
+
+    /// Current index readiness and live scan metrics.
+    fn index_snapshot(&self) -> IndexSnapshot {
+        IndexSnapshot {
+            state: self.index_state(),
+            files_indexed: 0,
+            last_scan_ms: 0,
+        }
+    }
+
+    /// Reinforce a retrieved path in backend ranking; callers treat errors as best-effort.
+    fn track_access(&self, _path: &Path) -> Result<()> {
+        Ok(())
+    }
 
     /// Drop and rebuild the index from disk. Optional for fakes.
     fn reindex(&self) -> Result<()>;
@@ -119,7 +155,12 @@ pub mod testing {
     }
 
     impl Retriever for FakeRetriever {
-        fn find_files(&self, query: &str, scope: Option<&str>) -> Result<Vec<FileHit>> {
+        fn find_files(
+            &self,
+            query: &str,
+            scope: Option<&str>,
+            include_archived: bool,
+        ) -> Result<Vec<FileHit>> {
             if let Some(msg) = self.find_error.lock().unwrap().clone() {
                 return Err(crate::Error::Retriever(msg));
             }
@@ -129,8 +170,12 @@ pub mod testing {
                 .iter()
                 .filter(|h| {
                     let p = h.path.to_string_lossy().to_ascii_lowercase();
+                    if !include_archived && (p == ".archive" || p.starts_with(".archive/")) {
+                        return false;
+                    }
+                    let logical = p.strip_prefix(".archive/").unwrap_or(&p);
                     if let Some(s) = scope {
-                        if !path_in_scope(&p, &s.to_ascii_lowercase()) {
+                        if !path_in_scope(logical, &s.to_ascii_lowercase()) {
                             return false;
                         }
                     }
@@ -145,6 +190,7 @@ pub mod testing {
             query: &str,
             _mode: GrepMode,
             scope: Option<&str>,
+            include_archived: bool,
         ) -> Result<Vec<ContentHit>> {
             if let Some(msg) = self.grep_error.lock().unwrap().clone() {
                 return Err(crate::Error::Retriever(msg));
@@ -155,8 +201,12 @@ pub mod testing {
                 .iter()
                 .filter(|h| {
                     let p = h.path.to_string_lossy().to_ascii_lowercase();
+                    if !include_archived && (p == ".archive" || p.starts_with(".archive/")) {
+                        return false;
+                    }
+                    let logical = p.strip_prefix(".archive/").unwrap_or(&p);
                     if let Some(s) = scope {
-                        if !path_in_scope(&p, &s.to_ascii_lowercase()) {
+                        if !path_in_scope(logical, &s.to_ascii_lowercase()) {
                             return false;
                         }
                     }
@@ -168,6 +218,14 @@ pub mod testing {
 
         fn index_state(&self) -> IndexState {
             self.state
+        }
+
+        fn index_snapshot(&self) -> IndexSnapshot {
+            IndexSnapshot {
+                state: self.state,
+                files_indexed: self.files.lock().unwrap().len() as u64,
+                last_scan_ms: 0,
+            }
         }
 
         fn reindex(&self) -> Result<()> {
@@ -195,7 +253,7 @@ mod tests {
                 score: 0.9,
             },
         ]);
-        let hits = fake.find_files("foo", Some("proj")).unwrap();
+        let hits = fake.find_files("foo", Some("proj"), false).unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].path, PathBuf::from("proj/a/foo.md"));
     }
@@ -204,7 +262,7 @@ mod tests {
     fn fake_find_error_surfaces_as_retriever() {
         let fake = FakeRetriever::ready();
         *fake.find_error.lock().unwrap() = Some("index corrupt".into());
-        let err = fake.find_files("x", None).unwrap_err();
+        let err = fake.find_files("x", None, false).unwrap_err();
         assert!(matches!(err, crate::Error::Retriever(_)));
     }
 

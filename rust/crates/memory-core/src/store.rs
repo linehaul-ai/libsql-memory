@@ -402,7 +402,7 @@ fn probe_dedup(
     let mut candidates: Vec<PathBuf> = Vec::new();
 
     // Path/slug search on title (errors abort the whole probe — index is unhealthy).
-    match r.find_files(title, scope) {
+    match r.find_files(title, scope, false) {
         Ok(hits) => {
             for h in hits {
                 push_unique(&mut candidates, h.path);
@@ -421,7 +421,7 @@ fn probe_dedup(
         }
     }
     for q in queries {
-        if let Ok(hits) = r.grep(q, GrepMode::Plain, scope) {
+        if let Ok(hits) = r.grep(q, GrepMode::Plain, scope, false) {
             for h in hits {
                 push_unique(&mut candidates, h.path);
             }

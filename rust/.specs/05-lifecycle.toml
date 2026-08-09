@@ -22,6 +22,7 @@ compaction = "doctor rolls entries older than 90 days into per-note counters"
 rule = "memory_read records an access event; search hits record a lighter-weight event"
 effect = "frequently retrieved notes gain a ranking multiplier — emergent spaced repetition"
 non_effect = "reads never touch the note file itself (updated stays a content timestamp; mtime stays meaningful for the watcher)"
+backend = "only search results that survive limit and budget shaping are recorded and sent to the retriever's best-effort access tracker"
 
 [decay]
 philosophy = "decay is advisory, then reversible, and only ever destructive by explicit human choice"
@@ -43,4 +44,4 @@ output = "human-readable report; --apply performs archive moves and compaction, 
 
 [reindex]
 command = "fff-memory reindex"
-behavior = "drop .index/ fff cache and rescan from disk; always safe because files are the source of truth"
+behavior = "destroy and reinitialize only .index/frecency and .index/queries, preserve .index/access.jsonl and other lifecycle state, then trigger and await a full live-index rescan"

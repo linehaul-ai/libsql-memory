@@ -27,9 +27,11 @@ deps = ["serde", "serde_yaml", "tempfile", "thiserror", "time"]
 location = "memory-core"
 sketch = '''
 pub trait Retriever {
-    fn find_files(&self, query: &str, scope: Option<&str>) -> Result<Vec<FileHit>>;
-    fn grep(&self, query: &str, mode: GrepMode, scope: Option<&str>) -> Result<Vec<ContentHit>>;
+    fn find_files(&self, query: &str, scope: Option<&str>, include_archived: bool) -> Result<Vec<FileHit>>;
+    fn grep(&self, query: &str, mode: GrepMode, scope: Option<&str>, include_archived: bool) -> Result<Vec<ContentHit>>;
     fn index_state(&self) -> IndexState;
+    fn index_snapshot(&self) -> IndexSnapshot;
+    fn track_access(&self, path: &Path) -> Result<()>;
     fn reindex(&self) -> Result<()>;
 }
 '''
@@ -44,7 +46,7 @@ name = "memory-index"
 kind = "lib"
 owns = [
   "FffRetriever: the only code that imports fff crates",
-  "watcher lifecycle, warm-up (ai_mode), scan-complete waiting",
+  "watcher lifecycle, warm-up (ai_mode), scan-complete waiting, live count and scan timing",
   "score extraction and normalization into backend-neutral FileHit/ContentHit",
 ]
 deps = ["memory-core", "fff-search (single crate, pinned exact version; grep is a module and fff-query-parser types are re-exported at its root; default 'ripgrep' walker feature)"]

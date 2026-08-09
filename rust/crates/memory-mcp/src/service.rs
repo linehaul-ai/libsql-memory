@@ -154,6 +154,10 @@ pub struct StatsSnapshot {
 pub struct IndexStats {
     /// `ready` | `cold` | `unavailable`.
     pub state: String,
+    /// Live, non-tombstoned files in the active index.
+    pub files_indexed: u64,
+    /// Wall-clock duration of the most recently completed full scan.
+    pub last_scan_ms: u64,
     /// Access log line count.
     pub access_log_events: u64,
 }
@@ -243,23 +247,29 @@ impl MemoryService {
             return Ok(budgeted.into());
         }
 
-        // Stage 2a: find_files
         stages.push(MatchStage::FindFiles);
-        if let Ok(hits) = retriever.find_files(query, scope) {
-            for h in hits {
-                if keep_path(&h.path, opts.include_archived) {
-                    file_raw.push((h.path, h.score));
-                }
+        stages.push(MatchStage::GrepPlain);
+        let (find_result, plain_result) = std::thread::scope(|threads| {
+            let find = threads.spawn(|| retriever.find_files(query, scope, opts.include_archived));
+            let plain = threads
+                .spawn(|| retriever.grep(query, GrepMode::Plain, scope, opts.include_archived));
+            (find.join(), plain.join())
+        });
+        let find_hits = find_result
+            .map_err(|_| stage_error("find_files", query, scope, "worker panicked"))?
+            .map_err(|e| stage_error("find_files", query, scope, &e.to_string()))?;
+        let plain_hits = plain_result
+            .map_err(|_| stage_error("grep_plain", query, scope, "worker panicked"))?
+            .map_err(|e| stage_error("grep_plain", query, scope, &e.to_string()))?;
+
+        for h in find_hits {
+            if keep_path(&h.path, opts.include_archived) {
+                file_raw.push((h.path, h.score));
             }
         }
-
-        // Stage 2b: plain grep
-        stages.push(MatchStage::GrepPlain);
-        if let Ok(hits) = retriever.grep(query, GrepMode::Plain, scope) {
-            for h in hits {
-                if keep_path(&h.path, opts.include_archived) {
-                    plain_raw.push((h.path, h.score, h.snippet));
-                }
+        for h in plain_hits {
+            if keep_path(&h.path, opts.include_archived) {
+                plain_raw.push((h.path, h.score, h.snippet));
             }
         }
 
@@ -268,11 +278,12 @@ impl MemoryService {
         // Stage 3: fuzzy escalate
         if merged.len() < MIN_RESULTS_FOR_FUZZY {
             stages.push(MatchStage::GrepFuzzy);
-            if let Ok(hits) = retriever.grep(query, GrepMode::Fuzzy, scope) {
-                for h in hits {
-                    if keep_path(&h.path, opts.include_archived) {
-                        fuzzy_raw.push((h.path, h.score, h.snippet));
-                    }
+            let hits = retriever
+                .grep(query, GrepMode::Fuzzy, scope, opts.include_archived)
+                .map_err(|e| stage_error("grep_fuzzy", query, scope, &e.to_string()))?;
+            for h in hits {
+                if keep_path(&h.path, opts.include_archived) {
+                    fuzzy_raw.push((h.path, h.score, h.snippet));
                 }
             }
             merged = merge_hits(&file_raw, &plain_raw, &fuzzy_raw);
@@ -288,16 +299,18 @@ impl MemoryService {
 
         let ranked = rank_hits(merged, &meta);
 
-        // Soft search-hit access log for top results (best-effort)
-        for hit in ranked
+        let backend_paths: HashMap<String, PathBuf> = ranked
             .iter()
-            .take(opts.limit.clamp(1, SEARCH_LIMIT_DEFAULT))
-        {
-            let _ = self.access.append(&hit.handle, AccessVia::SearchHit);
-        }
-
+            .map(|hit| (hit.handle.clone(), hit.path.clone()))
+            .collect();
         let budget_bytes = opts.budget_bytes.clamp(1, BUDGET_BYTES_MAX);
         let budgeted = apply_budget(ranked, opts.limit, budget_bytes, &stages, &scope_label);
+        for hit in &budgeted.results {
+            let _ = self.access.append(&hit.handle, AccessVia::SearchHit);
+            if let Some(path) = backend_paths.get(&hit.handle) {
+                let _ = retriever.track_access(path);
+            }
+        }
         Ok(budgeted.into())
     }
 
@@ -401,10 +414,15 @@ impl MemoryService {
             }
         }
 
-        let state = match self.retriever.as_ref().map(|r| r.index_state()) {
-            Some(IndexState::Ready) => "ready",
-            Some(IndexState::Cold) => "cold",
-            Some(IndexState::Unavailable) | None => "unavailable",
+        let snapshot = self
+            .retriever
+            .as_ref()
+            .map(|r| r.index_snapshot())
+            .unwrap_or_default();
+        let state = match snapshot.state {
+            IndexState::Ready => "ready",
+            IndexState::Cold => "cold",
+            IndexState::Unavailable => "unavailable",
         };
 
         Ok(StatsSnapshot {
@@ -414,6 +432,8 @@ impl MemoryService {
             disk_bytes,
             index: IndexStats {
                 state: state.into(),
+                files_indexed: snapshot.files_indexed,
+                last_scan_ms: snapshot.last_scan_ms,
                 access_log_events: self.access.len() as u64,
             },
             decay: DecayStats {
@@ -436,6 +456,13 @@ impl MemoryService {
             handle,
         })
     }
+}
+
+fn stage_error(stage: &str, query: &str, scope: Option<&str>, detail: &str) -> Error {
+    Error::Retriever(format!(
+        "stage={stage} query={query:?} scope={:?}: {detail}",
+        scope.unwrap_or("")
+    ))
 }
 
 fn keep_path(path: &Path, include_archived: bool) -> bool {
@@ -542,8 +569,10 @@ pub fn store_action_str(a: StoreAction) -> &'static str {
 mod tests {
     use super::*;
     use memory_core::testing::FakeRetriever;
-    use memory_core::{ContentHit, FileHit};
-    use std::sync::Mutex;
+    use memory_core::{ContentHit, FileHit, IndexSnapshot};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Barrier, Mutex};
+    use std::time::{Duration, Instant};
     use tempfile::tempdir;
 
     fn seed_note(root: &Path, rel: &str, title: &str, aliases: &[&str], body: &str) {
@@ -671,6 +700,268 @@ mod tests {
     }
 
     #[test]
+    fn archived_search_uses_logical_handle() {
+        let dir = tempdir().unwrap();
+        seed_note(
+            dir.path(),
+            ".archive/proj/old.md",
+            "Old Note",
+            &["retired note", "archived note"],
+            "retired body",
+        );
+        let fake = FakeRetriever {
+            state: IndexState::Ready,
+            contents: Mutex::new(vec![ContentHit {
+                path: PathBuf::from(".archive/proj/old.md"),
+                snippet: "retired body".into(),
+                line: 8,
+                score: 1.0,
+            }]),
+            ..FakeRetriever::ready()
+        };
+        let svc = MemoryService::new(dir.path(), Some(Arc::new(fake)));
+
+        let response = svc
+            .search(SearchOptions {
+                query: "retired".into(),
+                namespace: Some("proj".into()),
+                include_archived: true,
+                ..Default::default()
+            })
+            .expect("archived search");
+
+        assert_eq!(response.results[0].handle, "proj/old");
+    }
+
+    struct BarrierRetriever {
+        barrier: Barrier,
+        active: AtomicUsize,
+    }
+
+    impl BarrierRetriever {
+        fn overlap(&self) {
+            let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
+            if active == 1 {
+                std::thread::sleep(Duration::from_millis(250));
+                if self.active.load(Ordering::SeqCst) == 2 {
+                    self.barrier.wait();
+                }
+            } else {
+                self.barrier.wait();
+            }
+            self.active.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+
+    impl Retriever for BarrierRetriever {
+        fn find_files(
+            &self,
+            _query: &str,
+            _scope: Option<&str>,
+            _include_archived: bool,
+        ) -> Result<Vec<FileHit>> {
+            self.overlap();
+            Ok((0..3)
+                .map(|i| FileHit {
+                    path: PathBuf::from(format!("proj/{i}.md")),
+                    score: 1.0,
+                })
+                .collect())
+        }
+
+        fn grep(
+            &self,
+            _query: &str,
+            _mode: GrepMode,
+            _scope: Option<&str>,
+            _include_archived: bool,
+        ) -> Result<Vec<ContentHit>> {
+            self.overlap();
+            Ok(vec![])
+        }
+
+        fn index_state(&self) -> IndexState {
+            IndexState::Ready
+        }
+
+        fn reindex(&self) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn search_overlaps_find_and_plain_grep() {
+        let dir = tempdir().unwrap();
+        let fake = BarrierRetriever {
+            barrier: Barrier::new(2),
+            active: AtomicUsize::new(0),
+        };
+        let svc = MemoryService::new(dir.path(), Some(Arc::new(fake)));
+
+        let started = Instant::now();
+        let response = svc
+            .search(SearchOptions {
+                query: "needle".into(),
+                namespace: Some("proj".into()),
+                ..Default::default()
+            })
+            .expect("search");
+
+        assert_eq!(response.results.len(), 3);
+        assert!(
+            started.elapsed() < Duration::from_millis(400),
+            "find and grep ran sequentially in {:?}",
+            started.elapsed()
+        );
+    }
+
+    struct StageErrorRetriever {
+        find: bool,
+        grep: Option<GrepMode>,
+    }
+
+    impl Retriever for StageErrorRetriever {
+        fn find_files(
+            &self,
+            _query: &str,
+            _scope: Option<&str>,
+            _include_archived: bool,
+        ) -> Result<Vec<FileHit>> {
+            if self.find {
+                Err(Error::Retriever("boom".into()))
+            } else {
+                Ok(vec![])
+            }
+        }
+
+        fn grep(
+            &self,
+            _query: &str,
+            mode: GrepMode,
+            _scope: Option<&str>,
+            _include_archived: bool,
+        ) -> Result<Vec<ContentHit>> {
+            if self.grep == Some(mode) {
+                Err(Error::Retriever("boom".into()))
+            } else {
+                Ok(vec![])
+            }
+        }
+
+        fn index_state(&self) -> IndexState {
+            IndexState::Ready
+        }
+
+        fn reindex(&self) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn search_errors_name_the_failed_stage_query_and_scope() {
+        for (fake, stage) in [
+            (
+                StageErrorRetriever {
+                    find: true,
+                    grep: None,
+                },
+                "find_files",
+            ),
+            (
+                StageErrorRetriever {
+                    find: false,
+                    grep: Some(GrepMode::Plain),
+                },
+                "grep_plain",
+            ),
+            (
+                StageErrorRetriever {
+                    find: false,
+                    grep: Some(GrepMode::Fuzzy),
+                },
+                "grep_fuzzy",
+            ),
+        ] {
+            let dir = tempdir().unwrap();
+            let svc = MemoryService::new(dir.path(), Some(Arc::new(fake)));
+            let error = svc
+                .search(SearchOptions {
+                    query: "needle".into(),
+                    namespace: Some("proj".into()),
+                    ..Default::default()
+                })
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains(stage), "error={error}");
+            assert!(error.contains("needle"), "error={error}");
+            assert!(error.contains("proj"), "error={error}");
+        }
+    }
+
+    #[derive(Default)]
+    struct TrackingRetriever {
+        tracked: Mutex<Vec<PathBuf>>,
+    }
+
+    impl Retriever for TrackingRetriever {
+        fn find_files(
+            &self,
+            _query: &str,
+            _scope: Option<&str>,
+            _include_archived: bool,
+        ) -> Result<Vec<FileHit>> {
+            Ok((0..3)
+                .map(|i| FileHit {
+                    path: PathBuf::from(format!("proj/{i}.md")),
+                    score: 1.0 - i as f32 * 0.1,
+                })
+                .collect())
+        }
+
+        fn grep(
+            &self,
+            _query: &str,
+            _mode: GrepMode,
+            _scope: Option<&str>,
+            _include_archived: bool,
+        ) -> Result<Vec<ContentHit>> {
+            Ok(vec![])
+        }
+
+        fn index_state(&self) -> IndexState {
+            IndexState::Ready
+        }
+
+        fn track_access(&self, path: &Path) -> Result<()> {
+            self.tracked.lock().unwrap().push(path.to_path_buf());
+            Ok(())
+        }
+
+        fn reindex(&self) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn search_records_only_results_that_survive_shaping() {
+        let dir = tempdir().unwrap();
+        let fake = Arc::new(TrackingRetriever::default());
+        let svc = MemoryService::new(dir.path(), Some(fake.clone()));
+
+        let response = svc
+            .search(SearchOptions {
+                query: "needle".into(),
+                budget_bytes: 80,
+                ..Default::default()
+            })
+            .expect("search");
+
+        assert_eq!(response.results.len(), 1);
+        assert_eq!(svc.access.len(), 1);
+        assert_eq!(fake.tracked.lock().unwrap().len(), 1);
+    }
+
+    #[test]
     fn forget_archives_by_default() {
         let dir = tempdir().unwrap();
         let svc = MemoryService::new(dir.path(), None);
@@ -731,6 +1022,59 @@ mod tests {
         assert_eq!(stats.by_namespace.get("proj").copied(), Some(1));
         assert_eq!(stats.by_type.get("decision").copied(), Some(1));
         assert_eq!(stats.index.state, "unavailable");
+        assert_eq!(stats.index.files_indexed, 0);
+        assert_eq!(stats.index.last_scan_ms, 0);
+    }
+
+    struct SnapshotRetriever;
+
+    impl Retriever for SnapshotRetriever {
+        fn find_files(
+            &self,
+            _query: &str,
+            _scope: Option<&str>,
+            _include_archived: bool,
+        ) -> Result<Vec<FileHit>> {
+            Ok(vec![])
+        }
+
+        fn grep(
+            &self,
+            _query: &str,
+            _mode: GrepMode,
+            _scope: Option<&str>,
+            _include_archived: bool,
+        ) -> Result<Vec<ContentHit>> {
+            Ok(vec![])
+        }
+
+        fn index_state(&self) -> IndexState {
+            IndexState::Ready
+        }
+
+        fn index_snapshot(&self) -> IndexSnapshot {
+            IndexSnapshot {
+                state: IndexState::Ready,
+                files_indexed: 7,
+                last_scan_ms: 11,
+            }
+        }
+
+        fn reindex(&self) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn stats_reports_retriever_snapshot() {
+        let dir = tempdir().unwrap();
+        let svc = MemoryService::new(dir.path(), Some(Arc::new(SnapshotRetriever)));
+
+        let stats = svc.stats(None).expect("stats");
+
+        assert_eq!(stats.index.state, "ready");
+        assert_eq!(stats.index.files_indexed, 7);
+        assert_eq!(stats.index.last_scan_ms, 11);
     }
 
     #[test]

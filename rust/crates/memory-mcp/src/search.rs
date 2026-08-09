@@ -350,7 +350,8 @@ pub struct NoteMeta {
 /// Convert `ns/slug.md` → `ns/slug`.
 pub fn path_to_handle(path: &Path) -> String {
     let s = path.to_string_lossy().replace('\\', "/");
-    s.strip_suffix(".md").unwrap_or(&s).to_string()
+    let logical = s.strip_prefix(".archive/").unwrap_or(&s);
+    logical.strip_suffix(".md").unwrap_or(logical).to_string()
 }
 
 /// Shape ranked hits under limit and byte budget; empty results get a hint.

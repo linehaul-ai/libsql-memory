@@ -9,16 +9,17 @@ status = "draft"
 [pipeline]
 stages = [
   "1. Parse query with fff-query-parser.",
-  "2. Run in parallel: (a) fffind over paths/slugs (titles are slugs, so this is title search); (b) plain-mode grep over note content — frontmatter included, so aliases and tags match here.",
+  "2. Run concurrently: (a) fffind over paths/slugs (titles are slugs, so this is title search); (b) plain-mode grep over note content — frontmatter included, so aliases and tags match here. A backend failure propagates with its stage, query, and scope.",
   "3. Escalate: if merged results < min_results (default 3), rerun grep in fuzzy mode.",
   "4. Merge and dedupe by (namespace, slug); a note matching in both stages takes the max component score plus a both-stages bonus.",
   "5. Rank: final = match_score * frecency_multiplier (see [ranking]).",
   "6. Shape output under the token budget (see [output]).",
 ]
 scope = "namespace argument narrows to a subtree; absent = whole root; .archive/ excluded unless include_archived = true"
+scope_application = "namespace constraints are applied inside fff before pagination; archived search uses a short-lived synchronous picker rooted at .archive/ and restores the .archive/ storage prefix only on returned paths"
 
 [ranking]
-match_score = "from fff Score.total (base + filename bonus + exact-match, etc.)"
+match_score = "each backend result page normalizes its native score to 0.0..=1.0 before merge; merged notes take the max component plus the both-stages bonus"
 frecency_multiplier = "derived from the access log (see 05-lifecycle.toml); recently/frequently retrieved notes rank higher"
 type_boosts = "small static boosts: preference and decision outrank session-summary at equal match score"
 prose_caveat = """

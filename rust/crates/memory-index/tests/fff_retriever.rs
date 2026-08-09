@@ -103,12 +103,35 @@ fn open_reports_ready() {
 }
 
 #[test]
+fn index_snapshot_reports_live_files_and_scan_time() {
+    let dir = tempdir().unwrap();
+    seed_corpus(dir.path());
+    let r = open_ready(dir.path());
+
+    let snapshot = r.index_snapshot();
+
+    assert_eq!(snapshot.state, IndexState::Ready);
+    assert_eq!(snapshot.files_indexed, 3);
+    assert!(snapshot.last_scan_ms > 0, "snapshot={snapshot:?}");
+}
+
+#[test]
+fn access_tracking_is_best_effort_for_indexed_paths() {
+    let dir = tempdir().unwrap();
+    seed_corpus(dir.path());
+    let r = open_ready(dir.path());
+
+    r.track_access(Path::new("linehaul/deploy.md"))
+        .expect("track access");
+}
+
+#[test]
 fn find_files_matches_slug_paths() {
     let dir = tempdir().unwrap();
     seed_corpus(dir.path());
     let r = open_ready(dir.path());
 
-    let hits = r.find_files("deploy", None).expect("find_files");
+    let hits = r.find_files("deploy", None, false).expect("find_files");
     assert!(
         hits.iter()
             .any(|h| h.path.to_string_lossy().contains("deploy")),
@@ -128,7 +151,9 @@ fn find_files_respects_namespace_scope() {
     seed_corpus(dir.path());
     let r = open_ready(dir.path());
 
-    let hits = r.find_files("md", Some("linehaul")).expect("scoped find");
+    let hits = r
+        .find_files("md", Some("linehaul"), false)
+        .expect("scoped find");
     assert!(!hits.is_empty(), "expected hits under linehaul");
     for h in &hits {
         let p = h.path.to_string_lossy();
@@ -145,6 +170,23 @@ fn find_files_respects_namespace_scope() {
 }
 
 #[test]
+fn scope_is_applied_before_find_pagination() {
+    let dir = tempdir().unwrap();
+    write_note(dir.path(), "wanted/needel.md", "needle");
+    for i in 0..60 {
+        write_note(dir.path(), &format!("wanted-noise-{i}/needle.md"), "needle");
+    }
+    let r = open_ready(dir.path());
+
+    let hits = r
+        .find_files("needle", Some("wanted"), false)
+        .expect("scoped find");
+
+    assert_eq!(hits.len(), 1, "scope page lost the target: {hits:?}");
+    assert_eq!(hits[0].path, Path::new("wanted/needel.md"));
+}
+
+#[test]
 fn grep_plain_matches_frontmatter_aliases() {
     let dir = tempdir().unwrap();
     seed_corpus(dir.path());
@@ -152,7 +194,7 @@ fn grep_plain_matches_frontmatter_aliases() {
 
     // Alias lives only in YAML frontmatter — must be greppable.
     let hits = r
-        .grep("shipping deploy", GrepMode::Plain, None)
+        .grep("shipping deploy", GrepMode::Plain, None, false)
         .expect("grep");
     assert!(
         hits.iter()
@@ -174,12 +216,57 @@ fn grep_body_content() {
     let r = open_ready(dir.path());
 
     let hits = r
-        .grep("blue-green", GrepMode::Plain, None)
+        .grep("blue-green", GrepMode::Plain, None, false)
         .expect("grep body");
     assert!(
         hits.iter()
             .any(|h| h.snippet.to_ascii_lowercase().contains("blue-green")),
         "body match missing: {hits:?}"
+    );
+}
+
+#[test]
+fn backend_scores_are_normalized_per_page() {
+    let dir = tempdir().unwrap();
+    seed_corpus(dir.path());
+    let r = open_ready(dir.path());
+
+    let files = r.find_files("md", None, false).expect("find scores");
+    let contents = r
+        .grep("raets", GrepMode::Fuzzy, None, false)
+        .expect("grep scores");
+
+    assert!(!files.is_empty());
+    assert!(!contents.is_empty());
+    assert!(files.iter().all(|h| (0.0..=1.0).contains(&h.score)));
+    assert!(contents.iter().all(|h| (0.0..=1.0).contains(&h.score)));
+}
+
+#[test]
+fn prose_title_alias_and_body_queries_rank_expected_note_first() {
+    let dir = tempdir().unwrap();
+    seed_corpus(dir.path());
+    let r = open_ready(dir.path());
+
+    let title = r.find_files("deploy", None, false).expect("title search");
+    let alias = r
+        .grep("DAT rates", GrepMode::Plain, None, false)
+        .expect("alias search");
+    let body = r
+        .grep("blue-green", GrepMode::Plain, None, false)
+        .expect("body search");
+
+    assert_eq!(
+        title.first().map(|h| h.path.as_path()),
+        Some(Path::new("linehaul/deploy.md"))
+    );
+    assert_eq!(
+        alias.first().map(|h| h.path.as_path()),
+        Some(Path::new("linehaul/rates.md"))
+    );
+    assert_eq!(
+        body.first().map(|h| h.path.as_path()),
+        Some(Path::new("linehaul/deploy.md"))
     );
 }
 
@@ -190,7 +277,7 @@ fn grep_scoped_to_namespace() {
     let r = open_ready(dir.path());
 
     let hits = r
-        .grep("rates", GrepMode::Plain, Some("linehaul"))
+        .grep("rates", GrepMode::Plain, Some("linehaul"), false)
         .expect("scoped grep");
     for h in &hits {
         assert!(
@@ -199,6 +286,32 @@ fn grep_scoped_to_namespace() {
             h.path
         );
     }
+}
+
+#[test]
+fn scope_is_applied_before_grep_pagination() {
+    let dir = tempdir().unwrap();
+    write_note(dir.path(), "z-wanted/hit.md", "pagination needle");
+    for i in 0..60 {
+        write_note(
+            dir.path(),
+            &format!("a-noise-{i}/hit.md"),
+            "pagination needle",
+        );
+    }
+    let r = open_ready(dir.path());
+
+    let hits = r
+        .grep(
+            "pagination needle",
+            GrepMode::Plain,
+            Some("z-wanted"),
+            false,
+        )
+        .expect("scoped grep");
+
+    assert_eq!(hits.len(), 1, "scope page lost the target: {hits:?}");
+    assert_eq!(hits[0].path, Path::new("z-wanted/hit.md"));
 }
 
 #[test]
@@ -227,13 +340,88 @@ Unique zebra token for reindex test.
     assert_eq!(r.index_state(), IndexState::Ready);
 
     let hits = r
-        .grep("zebra token", GrepMode::Plain, None)
+        .grep("zebra token", GrepMode::Plain, None, false)
         .expect("grep after reindex");
     assert!(
         hits.iter()
             .any(|h| h.path.to_string_lossy().contains("new-note")),
         "new file should be greppable after reindex: {hits:?}"
     );
+}
+
+#[test]
+fn reindex_recreates_fff_dbs_but_preserves_access_log() {
+    let dir = tempdir().unwrap();
+    seed_corpus(dir.path());
+    let r = open_ready(dir.path());
+    let index = dir.path().join(".index");
+    let access = index.join("access.jsonl");
+    fs::write(&access, "{\"handle\":\"linehaul/deploy\"}\n").unwrap();
+    fs::write(index.join("frecency/stale-marker"), "stale").unwrap();
+    fs::write(index.join("queries/stale-marker"), "stale").unwrap();
+
+    r.reindex().expect("reindex");
+
+    assert_eq!(
+        fs::read_to_string(access).unwrap(),
+        "{\"handle\":\"linehaul/deploy\"}\n"
+    );
+    assert!(index.join("frecency").is_dir());
+    assert!(index.join("queries").is_dir());
+    assert!(!index.join("frecency/stale-marker").exists());
+    assert!(!index.join("queries/stale-marker").exists());
+}
+
+#[test]
+fn external_file_edit_becomes_searchable_without_reindex() {
+    let dir = tempdir().unwrap();
+    seed_corpus(dir.path());
+    let r = open_ready(dir.path());
+
+    write_note(
+        dir.path(),
+        "linehaul/watched-note.md",
+        "---\ntitle: Watched Note\naliases: [live edit, watcher test]\ntype: fact\ncreated: 2026-06-01\nupdated: 2026-06-01\n---\nwatcher-only-needle\n",
+    );
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let hits = r
+            .grep("watcher-only-needle", GrepMode::Plain, None, false)
+            .expect("live grep");
+        if hits.iter().any(|h| h.path.ends_with("watched-note.md")) {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "watcher did not index the external edit: {hits:?}"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+#[test]
+fn archived_hits_respect_namespace_scope() {
+    let dir = tempdir().unwrap();
+    seed_corpus(dir.path());
+    write_note(
+        dir.path(),
+        ".archive/linehaul/old.md",
+        "---\ntitle: Linehaul Archive\naliases: [retired linehaul, old linehaul]\ntype: fact\ncreated: 2025-01-01\nupdated: 2025-01-01\n---\narchived needle\n",
+    );
+    write_note(
+        dir.path(),
+        ".archive/other/old.md",
+        "---\ntitle: Other Archive\naliases: [retired note, old note]\ntype: fact\ncreated: 2025-01-01\nupdated: 2025-01-01\n---\narchived needle\n",
+    );
+    let r = open_ready(dir.path());
+
+    let hits = r
+        .grep("archived needle", GrepMode::Plain, Some("linehaul"), true)
+        .expect("archived grep");
+
+    assert_eq!(hits.len(), 1, "unexpected archived hits: {hits:?}");
+    assert_eq!(hits[0].path, Path::new(".archive/linehaul/old.md"));
 }
 
 #[test]
