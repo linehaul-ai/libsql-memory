@@ -336,7 +336,9 @@ git commit -m "feat(plugin): ship Rust memory automation"
 - Modify: `rust/crates/memory-core/Cargo.toml`
 - Modify: `rust/crates/memory-core/src/slugify.rs`
 - Modify: `rust/crates/memory-core/src/note.rs`
+- Modify when corpus evidence requires raw fff confidence: `rust/crates/memory-index/src/fff.rs`
 - Create: `rust/crates/fff-memory/tests/dogfood.rs`
+- Modify when corpus evidence changes retrieval semantics: `rust/.specs/03-retrieval.toml`
 - Modify: `rust/.specs/08-roadmap.toml`
 
 **Interfaces:**
@@ -356,7 +358,7 @@ cargo test -p memory-core -- --nocapture
 cargo test -p fff-memory --test dogfood -- --nocapture
 ```
 
-Expected: property harness/corpus are absent; any ranking miss is treated as a real OQ-2 finding and fixed in the thin rerank layer, not by weakening expectations.
+Expected: property harness/corpus are absent; any ranking miss is treated as a real OQ-2 finding rather than weakening expectations. Fix backend-neutral ordering in the thin rerank layer; if the needed raw confidence is discarded by normalization, keep the smallest backend-specific gate in memory-index and update spec 03.
 
 - [ ] **Step 3: Update roadmap evidence**
 
@@ -377,6 +379,6 @@ Then inspect `git diff --check`, `git status --short`, every roadmap scope bulle
 - [ ] **Step 5: Commit**
 
 ```bash
-git add rust/Cargo.toml rust/Cargo.lock rust/crates/memory-core rust/crates/fff-memory/tests/dogfood.rs rust/.specs/08-roadmap.toml
+git add docs/superpowers/plans/2026-08-09-roadmap-completion.md rust/Cargo.toml rust/Cargo.lock rust/crates/memory-core rust/crates/memory-index/src/fff.rs rust/crates/fff-memory/tests/dogfood.rs rust/.specs/03-retrieval.toml rust/.specs/08-roadmap.toml
 git commit -m "test: prove roadmap implementation on prose corpus"
 ```

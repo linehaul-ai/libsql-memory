@@ -293,6 +293,7 @@ mod optional_date_serde {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
     use time::Month;
 
     const SPEC_EXAMPLE: &str = r#"---
@@ -311,6 +312,74 @@ Related: [[docker-registry-auth]]
 
     fn date(y: i32, m: u8, d: u8) -> Date {
         Date::from_calendar_date(y, Month::try_from(m).unwrap(), d).unwrap()
+    }
+
+    fn text(min: usize, max: usize) -> impl Strategy<Value = String> {
+        prop::collection::vec(
+            prop_oneof![
+                any::<char>().prop_filter("non-control character", |ch| !ch.is_control()),
+                Just('é'),
+                Just('界'),
+                Just('🦀'),
+                Just(' '),
+            ],
+            min..max,
+        )
+        .prop_map(|chars| chars.into_iter().collect())
+        .prop_filter("non-empty after trimming", |value: &String| {
+            !value.trim().is_empty()
+        })
+    }
+
+    fn note_type() -> impl Strategy<Value = NoteType> {
+        prop_oneof![
+            Just(NoteType::Fact),
+            Just(NoteType::Decision),
+            Just(NoteType::Preference),
+            Just(NoteType::Lesson),
+            Just(NoteType::Reference),
+            Just(NoteType::SessionSummary),
+        ]
+    }
+
+    fn valid_date() -> impl Strategy<Value = Date> {
+        (2000i32..2100, 1u8..13, 1u8..29).prop_map(|(year, month, day)| date(year, month, day))
+    }
+
+    prop_compose! {
+        fn valid_note()
+            (title in text(1, 50),
+             aliases in prop::collection::vec(text(1, 35), 2..7),
+             tags in prop::collection::vec(text(1, 24), 0..5),
+             note_type in note_type(),
+             created in valid_date(),
+             updated in valid_date(),
+             expires in prop::option::of(valid_date()),
+             source in prop::option::of(text(1, 40)),
+             body in prop::option::of(text(1, 160)))
+            -> Note {
+                Note {
+                    frontmatter: NoteFrontmatter {
+                        title,
+                        aliases,
+                        tags,
+                        note_type,
+                        created,
+                        updated,
+                        expires,
+                        source,
+                    },
+                    body: body.map(|body| format!("{body}\n")).unwrap_or_default(),
+                }
+            }
+    }
+
+    proptest! {
+        #[test]
+        fn full_frontmatter_markdown_round_trips(note in valid_note()) {
+            let markdown = note.to_markdown().unwrap();
+            prop_assert_eq!(Note::parse(&markdown).unwrap(), note);
+        }
     }
 
     #[test]

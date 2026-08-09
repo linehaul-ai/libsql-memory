@@ -352,6 +352,13 @@ fn find_in_picker(
     if let Some(scope_glob) = scope_glob.as_deref() {
         parsed.constraints.push(Constraint::Glob(scope_glob));
     }
+    // ponytail: corpus-calibrated floor; use backend confidence if fff exposes one.
+    let min_base_score = parsed
+        .grep_text()
+        .chars()
+        .filter(|ch| ch.is_alphanumeric())
+        .count() as i32
+        * 2;
     let mut hits = Vec::new();
     let mut offset = 0;
     loop {
@@ -376,9 +383,11 @@ fn find_in_picker(
             .zip(results.scores.iter())
             .filter_map(|(item, score)| {
                 let logical = PathBuf::from(item.relative_path(picker));
-                keep_path(&logical, scope).then(|| FileHit {
-                    path: prefix.map_or(logical.clone(), |p| p.join(&logical)),
-                    score: score.total as f32,
+                (score.base_score >= min_base_score && keep_path(&logical, scope)).then(|| {
+                    FileHit {
+                        path: prefix.map_or(logical.clone(), |p| p.join(&logical)),
+                        score: score.total as f32,
+                    }
                 })
             })
             .collect();

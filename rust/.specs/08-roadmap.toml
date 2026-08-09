@@ -18,6 +18,9 @@ scope = [
   "end-to-end smoke test in CI",
 ]
 exit_criteria = "Real memories stored and retrieved in daily Claude Code use; retrieval *feel* judged on a corpus of 20+ hand-written notes. Feel cannot be computed — this phase exists to measure it."
+implementation_status = "COMPLETE 2026-08-09"
+implementation_evidence = "Property tests cover slug and full-note round trips; a deterministic 20-note prose corpus proves store -> real fff index -> layered search -> read, title/alias/typo recall, namespace scope, archive behavior, type/frecency boosts, and explicit empty guidance; spawned rmcp stdio tests prove the process boundary."
+acceptance_status = "PENDING REAL USE: the checked-in corpus is reproducible engineering evidence, not 20+ hand-written daily-use memories or a subjective retrieval-feel judgment."
 
 [[phase]]
 n = 2
@@ -29,6 +32,9 @@ scope = [
   "alias-quality validation in doctor",
 ]
 exit_criteria = "Memory accumulates and surfaces without manual tool calls across one week of real sessions."
+implementation_status = "COMPLETE 2026-08-09"
+implementation_evidence = "Dedup store modes, forget/stats, alias-quality doctor checks, portable plugin packaging, and three fail-open hooks are covered by unit, package, and wire tests. Stop writes require the plugin-scoped memory_store permission to be pre-approved; otherwise the hook skips without blocking the session."
+acceptance_status = "PENDING ELAPSED USE: one week of real automated sessions has not occurred."
 
 [[phase]]
 n = 3
@@ -40,6 +46,9 @@ scope = [
   "stats decay-health metrics; git commit-message suggestions",
 ]
 exit_criteria = "Store stays healthy unattended: decay candidates surface, archive works, no hoarding."
+implementation_status = "COMPLETE 2026-08-09"
+implementation_evidence = "Lifecycle tests prove strict access-log authority, weighted reinforcement, compaction recovery/concurrency, decay candidates, archive/read behavior, wikilink breadcrumbs, explainable ranking, decay-health stats, and doctor commit-message suggestions."
+acceptance_status = "PENDING UNATTENDED USE: tests prove mechanisms, not long-running no-hoarding behavior."
 
 # --- Risks ---
 
@@ -51,7 +60,7 @@ mitigation = "pin exact versions; confine all fff imports to memory-index; Retri
 [[risk]]
 id = "R-2"
 name = "fff scoring is code-tuned, corpus is prose markdown"
-mitigation = "own re-rank layer on top of raw scores; phase-1 dogfooding validates on real notes before any automation is layered on"
+mitigation = "own re-rank layer on top of raw scores; the deterministic 20-note corpus catches prose-ordering regressions, while daily-use acceptance remains required before declaring the risk retired"
 
 [[risk]]
 id = "R-3"
@@ -79,7 +88,8 @@ answer = "Yes: FrecencyTracker and QueryTracker are LMDB-backed databases opened
 [[open_question]]
 id = "OQ-2"
 q = "How does fff scoring behave on frontmatter-heavy prose? Do alias lines match well in plain grep, and does fuzzy mode over-match on YAML syntax?"
-resolve_by = "phase 1 dogfooding with the 20-note corpus"
+status = "RESOLVED 2026-08-09"
+answer = "The deterministic 20-note prose corpus proves exact title, alias-only plain grep, typo-tolerant fuzzy grep, namespace, archive, type, and frecency ordering through the real backend. It exposed a weak single-result filename fuzzy match being normalized to 1.0; memory-index now rejects filename matches below a query-length confidence floor before backend-neutral normalization. Frontmatter provenance tests cover inline/block aliases, tags, titles, BOM notes, and body text. Subjective feel still requires the Phase 1 real-use exit criterion."
 
 [[open_question]]
 id = "OQ-3"
@@ -90,9 +100,11 @@ answer = "Yes. The official rmcp 3.1.2 service runs MemoryServer's exact five-to
 [[open_question]]
 id = "OQ-4"
 q = "Migration: seed the new store from the user's existing global markdown memory (~/.claude/.../memory/)? Their format is nearly identical (frontmatter + body + [[links]])."
-resolve_by = "phase 2; likely a one-shot import subcommand"
+status = "NO FOR V1 2026-08-09"
+answer = "Do not add an import subcommand in v1. The source and destination are compatible markdown notes, so a deliberate file copy is sufficient if migration is wanted; product code would add a destructive/path-sensitive surface without improving the core loop."
 
 [[open_question]]
 id = "OQ-5"
 q = "What happens to this repo? Proposal: new Rust workspace lives in rust/, Go tree and committed binaries removed once phase 1 dogfooding sticks."
-resolve_by = "user decision at phase 1 exit"
+status = "AWAITING USER DECISION"
+answer = "Keep the legacy Go tree and committed binaries untouched until the user explicitly authorizes their deletion after real Phase 1 dogfooding."

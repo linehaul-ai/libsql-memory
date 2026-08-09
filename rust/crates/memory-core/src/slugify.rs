@@ -118,6 +118,31 @@ pub fn validate_namespace(namespace: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn slugify_preserves_identity_invariants(title in any::<String>()) {
+            let has_ascii_alnum = title.chars().any(|ch| ch.is_ascii_alphanumeric());
+            match slugify(&title) {
+                Ok(slug) => {
+                    prop_assert!(has_ascii_alnum);
+                    prop_assert!(!slug.is_empty());
+                    prop_assert!(slug.len() <= SLUG_MAX_LEN);
+                    prop_assert!(slug.is_ascii());
+                    prop_assert!(!slug.starts_with('-'));
+                    prop_assert!(!slug.ends_with('-'));
+                    prop_assert!(!slug.contains("--"));
+                    prop_assert!(slug.bytes().all(|byte| byte.is_ascii_lowercase()
+                        || byte.is_ascii_digit()
+                        || byte == b'-'));
+                    prop_assert_eq!(slugify(&slug).unwrap(), slug);
+                }
+                Err(Error::InvalidSlug { .. }) => prop_assert!(!has_ascii_alnum),
+                Err(error) => prop_assert!(false, "unexpected error: {error}"),
+            }
+        }
+    }
 
     #[test]
     fn slugify_basic() {

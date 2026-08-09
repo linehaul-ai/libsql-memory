@@ -20,14 +20,16 @@ scope_application = "namespace constraints use a root-anchored, literal-escaped 
 archive_collisions = "an active note shadows the archived note with the same logical namespace/slug even when only archived content matched; if both storage paths are returned, they dedupe to the active note"
 
 [ranking]
-match_score = "each backend result page normalizes its native score to 0.0..=1.0 before merge; merged notes take the max component plus the both-stages bonus"
+match_score = "memory-index rejects weak native filename-fuzzy hits using raw fff base score before that signal is discarded, then each retained backend result page normalizes its native score to 0.0..=1.0 before merge; merged notes take the max component plus the both-stages bonus"
+filename_confidence = "the pre-normalization filename gate is backend-specific and therefore stays inside memory-index, the only fff-aware crate; its corpus-calibrated floor is 2 * the alphanumeric query length, while exact/plain/fuzzy content retrieval remains unchanged"
 frecency_multiplier = "derived from the access log as read + 0.25 * search_hit (see 05-lifecycle.toml); recently/frequently retrieved notes rank higher"
 type_boosts = "small static boosts: preference and decision outrank session-summary at equal match score"
 prose_caveat = """
 fff scoring heuristics are code-tuned (definition classification, filename
-bonuses). Unvalidated on prose. We keep our own thin re-rank layer (steps 4-5)
-on top of raw fff scores precisely so we can correct for this after dogfooding
-without touching the search stages.
+bonuses). The checked-in prose corpus validates them continuously. We keep our
+own thin re-rank layer (steps 4-5) for backend-neutral ordering corrections;
+quality gates that require native score components run in memory-index before
+normalization discards those components.
 """
 
 [output]
