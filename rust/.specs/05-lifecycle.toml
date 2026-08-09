@@ -18,7 +18,7 @@ is the authority for lifecycle decisions either way.
 """
 compaction = "doctor rolls entries older than 90 days into per-note, per-via counters"
 integrity = "append, snapshot, and compaction coordinate across processes through .index/access.lock"
-recovery = "access_counts.json stores an inclusive compacted_through RFC3339 cutoff; counters are replaced before the compacted log, and readers ignore source events at or before the cutoff so interruption is idempotent"
+recovery = "access_counts.json stores an inclusive compacted_through RFC3339 cutoff; counters are replaced before the compacted log, both replacements use the shared fsync-and-rename path including parent-directory sync, and readers ignore source events at or before the cutoff so interruption is idempotent"
 validation = "every nonblank JSONL line is parsed strictly; errors name the access-log path and physical line number"
 snapshot = "one fallible, coherent snapshot exposes per-via recent counts and whether each handle was ever accessed"
 
@@ -47,6 +47,7 @@ checks = [
 ]
 output = "human-readable report; --apply performs archive moves and compaction, prints a suggested git commit message"
 failure_policy = "doctor validates one coherent access snapshot before decay decisions; --apply performs no archive moves when lifecycle state is corrupt"
+index_check = "doctor opens the retriever by default, reports ready healthy indexes without a warning, and suggests reindex when the backend-neutral live indexed-file count exceeds the active memory-note count; index-open failure remains fail-open for file and lifecycle inspection"
 
 [reindex]
 command = "fff-memory reindex"

@@ -100,8 +100,6 @@ enum Command {
     Doctor {
         #[arg(long)]
         apply: bool,
-        #[arg(long)]
-        with_index: bool,
     },
     /// Drop and rebuild only the disposable fff index databases.
     Reindex,
@@ -231,17 +229,9 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         Command::Stats { namespace } => {
             write_json(&service_with_optional_retriever(&root).stats(namespace.as_deref())?)?
         }
-        Command::Doctor { apply, with_index } => {
-            let retriever = if with_index {
-                Some(FffRetriever::open(&root)?)
-            } else {
-                None
-            };
-            let report = run_doctor(
-                &root,
-                retriever.as_ref().map(|value| value as &dyn Retriever),
-                DoctorOptions { apply },
-            )?;
+        Command::Doctor { apply } => {
+            let retriever = optional_retriever(&root);
+            let report = run_doctor(&root, retriever.as_deref(), DoctorOptions { apply })?;
             print!("{report}");
         }
         Command::Reindex => {
@@ -253,17 +243,21 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn service_with_optional_retriever(root: &Path) -> MemoryService {
-    let retriever = match FffRetriever::open(root) {
+    MemoryService::new(root, optional_retriever(root))
+}
+
+fn optional_retriever(root: &Path) -> Option<Arc<dyn Retriever>> {
+    match FffRetriever::open(root) {
         Ok(retriever) => Some(Arc::new(retriever) as Arc<dyn Retriever>),
         Err(error) => {
             eprintln!(
-                "warning: retrieval unavailable for {}: {error}; continuing without index",
+                "warning: retrieval unavailable for {}: {error}; continuing without index; run `fff-memory reindex --root {}` to repair it",
+                root.display(),
                 root.display()
             );
             None
         }
-    };
-    MemoryService::new(root, retriever)
+    }
 }
 
 fn write_json(value: &impl Serialize) -> Result<(), serde_json::Error> {

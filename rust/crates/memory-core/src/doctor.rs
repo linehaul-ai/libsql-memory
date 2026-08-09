@@ -59,7 +59,7 @@ pub struct DoctorReport {
     pub alias_warnings: Vec<QualityWarning>,
     /// Wikilink targets with no file.
     pub unresolved_links: Vec<UnresolvedLink>,
-    /// Suggest reindex when index is cold/unavailable.
+    /// Suggest reindex when index is cold, unavailable, or contains orphaned entries.
     pub index_hint: Option<String>,
     /// Compaction stats (set after apply, or dry-run estimate when none rolled).
     pub compaction: Option<CompactionStats>,
@@ -252,13 +252,27 @@ pub fn run_doctor(
         }
     }
 
-    let index_hint = match retriever.map(|r| r.index_state()) {
-        Some(IndexState::Ready) => None,
-        Some(IndexState::Cold) => Some(
+    let index_hint = match retriever.map(|r| r.index_snapshot()) {
+        Some(snapshot)
+            if snapshot.state == IndexState::Ready
+                && snapshot.files_indexed > notes.len() as u64 =>
+        {
+            let orphaned = snapshot.files_indexed - notes.len() as u64;
+            Some(format!(
+                "{orphaned} orphaned index {} detected; run `fff-memory reindex`",
+                if orphaned == 1 {
+                    "entry"
+                } else {
+                    "entries"
+                }
+            ))
+        }
+        Some(snapshot) if snapshot.state == IndexState::Ready => None,
+        Some(snapshot) if snapshot.state == IndexState::Cold => Some(
             "index is cold (scan in progress or incomplete); run `fff-memory reindex` if search is stale"
                 .into(),
         ),
-        Some(IndexState::Unavailable) | None => Some(
+        Some(_) | None => Some(
             "index unavailable; run `fff-memory reindex` after opening a retriever".into(),
         ),
     };
