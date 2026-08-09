@@ -564,6 +564,8 @@ fn external_file_edit_becomes_searchable_without_reindex() {
     let dir = tempdir().unwrap();
     seed_corpus(dir.path());
     let r = open_ready(dir.path());
+    let initial_files = r.index_snapshot().files_indexed;
+    let path = dir.path().join("linehaul/watched-note.md");
 
     write_note(
         dir.path(),
@@ -582,6 +584,53 @@ fn external_file_edit_becomes_searchable_without_reindex() {
         assert!(
             std::time::Instant::now() < deadline,
             "watcher did not index the external edit: {hits:?}"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    fs::write(
+        &path,
+        "---\ntitle: Watched Note\naliases: [live edit, watcher test]\ntype: fact\ncreated: 2026-06-01\nupdated: 2026-06-02\n---\nwatcher-modified-needle\n",
+    )
+    .unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let modified = r
+            .grep("watcher-modified-needle", GrepMode::Plain, None, false)
+            .expect("modified grep");
+        let old = r
+            .grep("watcher-only-needle", GrepMode::Plain, None, false)
+            .expect("stale grep");
+        if modified
+            .iter()
+            .any(|hit| hit.path.ends_with("watched-note.md"))
+            && old.is_empty()
+        {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "watcher did not replace stale content: modified={modified:?} old={old:?}"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    fs::remove_file(&path).unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let found = r
+            .find_files("watched note", None, false)
+            .expect("find deleted note");
+        let grepped = r
+            .grep("watcher-modified-needle", GrepMode::Plain, None, false)
+            .expect("grep deleted note");
+        let files_indexed = r.index_snapshot().files_indexed;
+        if found.is_empty() && grepped.is_empty() && files_indexed == initial_files {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "watcher retained deleted note: found={found:?} grepped={grepped:?} files_indexed={files_indexed} initial_files={initial_files}"
         );
         std::thread::sleep(Duration::from_millis(50));
     }
