@@ -256,11 +256,9 @@ pub fn run_doctor(
         Some(retriever) if retriever.index_state() == IndexState::Ready => {
             match retriever.indexed_paths() {
                 Ok(indexed_paths) => {
-                    let active_paths: std::collections::HashSet<_> =
-                        notes.iter().map(|(path, _)| path).collect();
                     let mut orphaned: Vec<_> = indexed_paths
                         .iter()
-                        .filter(|path| !active_paths.contains(path))
+                        .filter(|path| !root.join(path).is_file())
                         .collect();
                     orphaned.sort();
                     if orphaned.is_empty() {

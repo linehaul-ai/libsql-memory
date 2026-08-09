@@ -1015,6 +1015,10 @@ mod tests {
             IndexState::Ready
         }
 
+        fn indexed_paths(&self) -> Result<Vec<PathBuf>> {
+            Ok(Vec::new())
+        }
+
         fn reindex(&self) -> Result<()> {
             Ok(())
         }
@@ -1288,6 +1292,10 @@ mod tests {
             IndexState::Ready
         }
 
+        fn indexed_paths(&self) -> Result<Vec<PathBuf>> {
+            Ok(Vec::new())
+        }
+
         fn reindex(&self) -> Result<()> {
             Ok(())
         }
@@ -1354,6 +1362,10 @@ mod tests {
 
         fn index_state(&self) -> IndexState {
             IndexState::Ready
+        }
+
+        fn indexed_paths(&self) -> Result<Vec<PathBuf>> {
+            Ok(Vec::new())
         }
 
         fn reindex(&self) -> Result<()> {
@@ -1434,6 +1446,10 @@ mod tests {
 
         fn index_state(&self) -> IndexState {
             IndexState::Ready
+        }
+
+        fn indexed_paths(&self) -> Result<Vec<PathBuf>> {
+            Ok(Vec::new())
         }
 
         fn track_access(&self, path: &Path) -> Result<()> {
@@ -1667,6 +1683,10 @@ mod tests {
                 files_indexed: 7,
                 last_scan_ms: 11,
             }
+        }
+
+        fn indexed_paths(&self) -> Result<Vec<PathBuf>> {
+            Ok(Vec::new())
         }
 
         fn reindex(&self) -> Result<()> {

@@ -90,7 +90,7 @@ fn doctor_uses_the_healthy_index_by_default() {
 }
 
 #[test]
-fn doctor_reports_an_indexed_non_note_as_orphaned() {
+fn doctor_does_not_call_a_live_indexed_non_note_orphaned() {
     let dir = tempdir().unwrap();
     write_expired(dir.path());
     fs::write(dir.path().join("orphan.txt"), "not a memory note").unwrap();
@@ -108,8 +108,9 @@ fn doctor_reports_an_indexed_non_note_as_orphaned() {
         .expect("run doctor");
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.contains("orphaned index"), "stdout={stdout}");
-    assert!(stdout.contains("fff-memory reindex"), "stdout={stdout}");
+    assert!(stdout.contains("Index: ok"), "stdout={stdout}");
+    assert!(!stdout.contains("orphaned index"), "stdout={stdout}");
+    assert!(!stdout.contains("fff-memory reindex"), "stdout={stdout}");
 }
 
 #[test]

@@ -31,6 +31,7 @@ pub trait Retriever {
     fn grep(&self, query: &str, mode: GrepMode, scope: Option<&str>, include_archived: bool) -> Result<Vec<ContentHit>>;
     fn index_state(&self) -> IndexState;
     fn index_snapshot(&self) -> IndexSnapshot;
+    fn indexed_paths(&self) -> Result<Vec<PathBuf>>;
     fn track_access(&self, path: &Path) -> Result<()>;
     fn reindex(&self) -> Result<()>;
 }

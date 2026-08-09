@@ -115,10 +115,8 @@ pub trait Retriever: Send + Sync {
         }
     }
 
-    /// Live indexed paths relative to the memory root, when exposed by the backend.
-    fn indexed_paths(&self) -> Result<Vec<PathBuf>> {
-        Ok(Vec::new())
-    }
+    /// Live indexed paths relative to the memory root.
+    fn indexed_paths(&self) -> Result<Vec<PathBuf>>;
 
     /// Reinforce a retrieved path in backend ranking; callers treat errors as best-effort.
     fn track_access(&self, _path: &Path) -> Result<()> {
