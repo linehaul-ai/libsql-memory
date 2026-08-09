@@ -1,0 +1,21 @@
+[package]
+name = "memory-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "MCP tools and retrieval merge/rank/budget for fff-memory"
+repository.workspace = true
+
+[dependencies]
+memory-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+time = { workspace = true }
+tokio = { workspace = true }
+rmcp = { workspace = true }
+schemars = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

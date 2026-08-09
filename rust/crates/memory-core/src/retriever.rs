@@ -53,11 +53,13 @@ pub enum IndexState {
     Ready,
 }
 
-/// Search backend used by store (dedup) and later by MCP search tools.
+/// Search backend used by store (dedup) and MCP search tools.
 ///
 /// Implementations must not be required on the write path: callers pass
 /// `Option<&dyn Retriever>` and treat any error as “skip dedup, create note”.
-pub trait Retriever {
+///
+/// `Send + Sync` so MCP servers can hold `Arc<dyn Retriever>`.
+pub trait Retriever: Send + Sync {
     /// Fuzzy/path search over note paths and slugs (titles become slugs).
     fn find_files(&self, query: &str, scope: Option<&str>) -> Result<Vec<FileHit>>;
 
@@ -71,8 +73,8 @@ pub trait Retriever {
     fn reindex(&self) -> Result<()>;
 }
 
-#[cfg(test)]
-pub(crate) mod fake {
+/// In-memory [`Retriever`] for tests in this crate and dependents.
+pub mod testing {
     use super::*;
     use std::sync::Mutex;
 
@@ -80,18 +82,25 @@ pub(crate) mod fake {
         path == scope || path.starts_with(&format!("{scope}/"))
     }
 
-    /// In-memory retriever for unit tests.
+    /// In-memory retriever for unit and integration tests.
     #[derive(Debug, Default)]
     pub struct FakeRetriever {
+        /// Index readiness reported to callers.
         pub state: IndexState,
+        /// Path hits returned by [`Retriever::find_files`].
         pub files: Mutex<Vec<FileHit>>,
+        /// Content hits returned by [`Retriever::grep`].
         pub contents: Mutex<Vec<ContentHit>>,
+        /// When set, `find_files` fails with this message.
         pub find_error: Mutex<Option<String>>,
+        /// When set, `grep` fails with this message.
         pub grep_error: Mutex<Option<String>>,
+        /// Count of [`Retriever::reindex`] calls.
         pub reindex_calls: Mutex<u32>,
     }
 
     impl FakeRetriever {
+        /// Ready index with empty hit lists.
         pub fn ready() -> Self {
             Self {
                 state: IndexState::Ready,
@@ -99,6 +108,7 @@ pub(crate) mod fake {
             }
         }
 
+        /// Ready index seeded with path hits.
         pub fn with_files(hits: Vec<FileHit>) -> Self {
             Self {
                 state: IndexState::Ready,
@@ -169,7 +179,7 @@ pub(crate) mod fake {
 
 #[cfg(test)]
 mod tests {
-    use super::fake::FakeRetriever;
+    use super::testing::FakeRetriever;
     use super::*;
     use std::path::PathBuf;
 

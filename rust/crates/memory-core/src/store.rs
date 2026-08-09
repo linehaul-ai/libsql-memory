@@ -490,7 +490,7 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::retriever::fake::FakeRetriever;
+    use crate::retriever::testing::FakeRetriever;
     use crate::retriever::{ContentHit, FileHit};
     use std::sync::Mutex;
     use tempfile::tempdir;
