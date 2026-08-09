@@ -569,6 +569,140 @@ fn rebuild_unlinks_symlinked_index_without_touching_its_target() {
     drop(retriever);
 }
 
+#[cfg(unix)]
+#[test]
+fn open_rejects_symlinked_index_without_writing_to_its_target() {
+    use std::os::unix::fs::symlink;
+
+    let root = tempdir().unwrap();
+    let external = tempdir().unwrap();
+    symlink(external.path(), root.path().join(".index")).unwrap();
+
+    let error = match FffRetriever::open(root.path()) {
+        Ok(_) => panic!("open must reject a symlinked index directory"),
+        Err(error) => error.to_string(),
+    };
+
+    assert!(error.contains("symlink"), "error={error}");
+    assert!(fs::read_dir(external.path()).unwrap().next().is_none());
+}
+
+#[cfg(unix)]
+#[test]
+fn open_rejects_each_symlinked_index_database_without_writing_to_its_target() {
+    use std::os::unix::fs::symlink;
+
+    for database in ["frecency", "queries"] {
+        let root = tempdir().unwrap();
+        let external = tempdir().unwrap();
+        fs::create_dir(root.path().join(".index")).unwrap();
+        symlink(external.path(), root.path().join(".index").join(database)).unwrap();
+
+        let error = match FffRetriever::open(root.path()) {
+            Ok(_) => panic!("open must reject symlinked {database} database"),
+            Err(error) => error.to_string(),
+        };
+
+        assert!(
+            error.contains("symlink"),
+            "database={database} error={error}"
+        );
+        assert!(
+            fs::read_dir(external.path()).unwrap().next().is_none(),
+            "database={database} wrote outside the memory root"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn open_rejects_each_symlinked_lmdb_file_without_creating_its_target() {
+    use std::os::unix::fs::symlink;
+
+    for relative in [
+        ".index/frecency/data.mdb",
+        ".index/frecency/lock.mdb",
+        ".index/queries/data.mdb",
+        ".index/queries/lock.mdb",
+    ] {
+        let root = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        let external_target = outside.path().join("created-outside");
+        let link = root.path().join(relative);
+        fs::create_dir_all(link.parent().unwrap()).unwrap();
+        symlink(&external_target, &link).unwrap();
+
+        let error = match FffRetriever::open(root.path()) {
+            Ok(_) => panic!("open must reject symlinked LMDB file {relative}"),
+            Err(error) => error.to_string(),
+        };
+
+        assert!(error.contains("symlink"), "path={relative} error={error}");
+        assert!(
+            !external_target.exists(),
+            "path={relative} created an external target"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn reindex_rejects_each_lmdb_file_replaced_with_a_symlink() {
+    use std::os::unix::fs::symlink;
+
+    for relative in [
+        ".index/frecency/data.mdb",
+        ".index/frecency/lock.mdb",
+        ".index/queries/data.mdb",
+        ".index/queries/lock.mdb",
+    ] {
+        let root = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        let external_target = outside.path().join("created-outside");
+        let retriever = open_ready(root.path());
+        let link = root.path().join(relative);
+        fs::remove_file(&link).unwrap();
+        symlink(&external_target, &link).unwrap();
+
+        let error = retriever
+            .reindex()
+            .expect_err("reindex must reject a substituted LMDB symlink")
+            .to_string();
+
+        assert!(error.contains("symlink"), "path={relative} error={error}");
+        assert!(
+            !external_target.exists(),
+            "path={relative} created an external target"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn archived_search_rejects_symlinked_archive_without_reading_its_target() {
+    use std::os::unix::fs::symlink;
+
+    let root = tempdir().unwrap();
+    let external = tempdir().unwrap();
+    seed_corpus(root.path());
+    write_note(
+        external.path(),
+        "private.md",
+        "---\ntitle: Private Archive\naliases: [outside note, symlink target]\ntype: fact\ncreated: 2025-01-01\nupdated: 2025-01-01\n---\nexternal-archive-secret\n",
+    );
+    fs::remove_dir_all(root.path().join(".archive")).unwrap();
+    symlink(external.path(), root.path().join(".archive")).unwrap();
+    let retriever = open_ready(root.path());
+
+    let error = retriever
+        .grep("external-archive-secret", GrepMode::Plain, None, true)
+        .expect_err("archived search must reject a symlinked archive")
+        .to_string();
+
+    assert!(error.contains("symlink"), "error={error}");
+    assert!(external.path().join("private.md").is_file());
+}
+
 #[test]
 fn external_file_edit_becomes_searchable_without_reindex() {
     let dir = tempdir().unwrap();

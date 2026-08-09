@@ -10,8 +10,9 @@ use crate::search::{
     BUDGET_BYTES_DEFAULT, MIN_RESULTS_FOR_FUZZY, SEARCH_LIMIT_DEFAULT,
 };
 use memory_core::{
-    extract_wikilinks, AccessLog, AccessSnapshot, AccessVia, GrepMode, IndexState, MemoryStore,
-    MergeMode, Note, NoteFrontmatter, NoteType, Retriever, StoreAction, StoreInput, StoreOutcome,
+    extract_wikilinks, safe_join, AccessLog, AccessSnapshot, AccessVia, GrepMode, IndexState,
+    MemoryStore, MergeMode, Note, NoteFrontmatter, NoteType, Retriever, StoreAction, StoreInput,
+    StoreOutcome,
 };
 use memory_core::{Error, Result};
 use serde::{Deserialize, Serialize};
@@ -323,9 +324,8 @@ impl MemoryService {
         let ranked = rank_hits(merged, &meta);
 
         let budgeted = apply_budget(ranked, opts.limit, opts.budget_bytes, &stages, &scope_label);
-        let _ = self
-            .access
-            .append_search_hits(budgeted.results.iter().map(|hit| hit.handle.as_str()));
+        self.access
+            .append_search_hits(budgeted.results.iter().map(|hit| hit.handle.as_str()))?;
         Ok(budgeted.into())
     }
 
@@ -333,15 +333,14 @@ impl MemoryService {
     pub fn read(&self, handle: &str) -> Result<ReadOutcome> {
         let (ns, slug) = parse_handle(handle)?;
         let relative = MemoryStore::relative_path(&ns, &slug);
-        let backend_path = self
-            .store
-            .root()
-            .join(&relative)
-            .is_file()
+        let backend_path = safe_join(self.store.root(), &relative)
+            .ok()
+            .and_then(|path| fs::symlink_metadata(path).ok())
+            .is_some_and(|metadata| metadata.is_file())
             .then_some(relative);
         let note = self.read_active_or_archived(&ns, &slug)?;
         let handle_norm = MemoryStore::handle(&ns, &slug);
-        let _ = self.access.append(&handle_norm, AccessVia::Read);
+        self.access.append(&handle_norm, AccessVia::Read)?;
         if let (Some(retriever), Some(path)) = (&self.retriever, backend_path.as_deref()) {
             let _ = retriever.track_access(path);
         }
@@ -372,11 +371,10 @@ impl MemoryService {
         match self.store.read(namespace, slug) {
             Ok(note) => Ok(note),
             Err(Error::NotFound { .. }) => {
-                let path = self
-                    .store
-                    .root()
-                    .join(".archive")
-                    .join(MemoryStore::relative_path(namespace, slug));
+                let path = safe_join(
+                    self.store.root(),
+                    &PathBuf::from(".archive").join(MemoryStore::relative_path(namespace, slug)),
+                )?;
                 let text = fs::read_to_string(&path).map_err(|e| {
                     if e.kind() == std::io::ErrorKind::NotFound {
                         Error::NotFound {
@@ -395,13 +393,13 @@ impl MemoryService {
     /// Archive (default) or hard-delete a note.
     pub fn forget(&self, handle: &str, hard: bool) -> Result<ForgetOutcome> {
         let (ns, slug) = parse_handle(handle)?;
-        let mut abs = self.store.absolute_path(&ns, &slug);
+        let relative = MemoryStore::relative_path(&ns, &slug);
+        let mut abs = safe_join(self.store.root(), &relative)?;
         if hard && !abs.is_file() {
-            abs = self
-                .store
-                .root()
-                .join(".archive")
-                .join(MemoryStore::relative_path(&ns, &slug));
+            abs = safe_join(
+                self.store.root(),
+                &PathBuf::from(".archive").join(&relative),
+            )?;
         }
         if !abs.is_file() {
             return Err(Error::NotFound {
@@ -501,7 +499,7 @@ impl MemoryService {
     }
 
     fn load_meta(&self, rel: &Path, access: Option<&AccessSnapshot>) -> Option<NoteMeta> {
-        let abs = self.store.root().join(rel);
+        let abs = safe_join(self.store.root(), rel).ok()?;
         let text = fs::read_to_string(abs).ok()?;
         let note = Note::parse(&text).ok()?;
         let handle = path_to_handle(rel);
@@ -569,11 +567,18 @@ fn keep_path(root: &Path, path: &Path, include_archived: bool) -> bool {
     if archived && !include_archived {
         return false;
     }
+    if safe_join(root, path).is_err() {
+        return false;
+    }
     if archived {
         let Ok(logical) = path.strip_prefix(".archive") else {
             return false;
         };
-        if root.join(logical).is_file() {
+        if safe_join(root, logical)
+            .ok()
+            .and_then(|path| fs::symlink_metadata(path).ok())
+            .is_some_and(|metadata| metadata.is_file())
+        {
             return false;
         }
     }
@@ -646,10 +651,14 @@ fn walk_dir(root: &Path, dir: &Path, out: &mut Vec<(PathBuf, Note, u64)>) -> Res
         if name_s == ".archive" {
             continue;
         }
-        if path.is_dir() {
+        let file_type = entry.file_type().map_err(|e| Error::io(&path, e))?;
+        if file_type.is_symlink() {
+            continue;
+        }
+        if file_type.is_dir() {
             walk_dir(root, &path, out)?;
-        } else if path.extension().and_then(|e| e.to_str()) == Some("md") {
-            let meta = fs::metadata(&path).map_err(|e| Error::io(&path, e))?;
+        } else if file_type.is_file() && path.extension().and_then(|e| e.to_str()) == Some("md") {
+            let meta = entry.metadata().map_err(|e| Error::io(&path, e))?;
             let text = fs::read_to_string(&path).map_err(|e| Error::io(&path, e))?;
             if let Ok(note) = Note::parse(&text) {
                 let rel = path.strip_prefix(root).unwrap_or(&path).to_path_buf();

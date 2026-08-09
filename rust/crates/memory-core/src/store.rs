@@ -14,6 +14,7 @@ use time::{Date, OffsetDateTime};
 
 use crate::error::{Error, Result};
 use crate::note::{Note, NoteFrontmatter, NoteType};
+use crate::path_safety::safe_join;
 use crate::retriever::{GrepMode, IndexState, Retriever};
 use crate::slugify::{slugify, validate_namespace};
 
@@ -99,11 +100,6 @@ impl MemoryStore {
         }
     }
 
-    /// Absolute path for `namespace/slug`.
-    pub fn absolute_path(&self, namespace: &str, slug: &str) -> PathBuf {
-        self.root.join(Self::relative_path(namespace, slug))
-    }
-
     /// `namespace/slug` handle string.
     pub fn handle(namespace: &str, slug: &str) -> String {
         if namespace.is_empty() {
@@ -116,7 +112,7 @@ impl MemoryStore {
     /// Read and parse a note by namespace + slug.
     pub fn read(&self, namespace: &str, slug: &str) -> Result<Note> {
         validate_namespace(namespace)?;
-        let path = self.absolute_path(namespace, slug);
+        let path = safe_join(&self.root, &Self::relative_path(namespace, slug))?;
         let text = fs::read_to_string(&path).map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
                 Error::NotFound {
@@ -131,7 +127,10 @@ impl MemoryStore {
 
     /// True when the note file exists on disk.
     pub fn exists(&self, namespace: &str, slug: &str) -> bool {
-        self.absolute_path(namespace, slug).is_file()
+        safe_join(&self.root, &Self::relative_path(namespace, slug))
+            .ok()
+            .and_then(|path| fs::symlink_metadata(path).ok())
+            .is_some_and(|metadata| metadata.is_file())
     }
 
     /// Move a note to `.archive/{namespace}/{slug}.md`. Never hard-deletes.
@@ -139,14 +138,14 @@ impl MemoryStore {
     /// Used by `memory_forget` (soft) and `doctor --apply`. Recoverable by moving back.
     pub fn archive_note(&self, namespace: &str, slug: &str) -> Result<PathBuf> {
         validate_namespace(namespace)?;
-        let abs = self.absolute_path(namespace, slug);
+        let rel = Self::relative_path(namespace, slug);
+        let abs = safe_join(&self.root, &rel)?;
         if !abs.is_file() {
             return Err(Error::NotFound {
                 handle: Self::handle(namespace, slug),
             });
         }
-        let rel = Self::relative_path(namespace, slug);
-        let dest = self.root.join(".archive").join(&rel);
+        let dest = safe_join(&self.root, &PathBuf::from(".archive").join(&rel))?;
         if let Some(parent) = dest.parent() {
             fs::create_dir_all(parent).map_err(|e| Error::io(parent, e))?;
         }
@@ -216,7 +215,10 @@ impl MemoryStore {
         // 3–4. Resolve target: existing slug path, else dedup probe, else create
         let mut dedup_hit: Option<String> = None;
         let (target_namespace, target_slug, action) = {
-            let path = self.absolute_path(&input.namespace, &candidate_slug);
+            let path = safe_join(
+                &self.root,
+                &Self::relative_path(&input.namespace, &candidate_slug),
+            )?;
             if path.is_file() {
                 (
                     input.namespace.clone(),
@@ -242,7 +244,12 @@ impl MemoryStore {
             }
         };
 
-        let abs = self.absolute_path(&target_namespace, &target_slug);
+        validate_namespace(&target_namespace)?;
+        reject_reserved_namespace(&target_namespace)?;
+        let abs = safe_join(
+            &self.root,
+            &Self::relative_path(&target_namespace, &target_slug),
+        )?;
 
         let note = match action {
             StoreAction::Created => Note {
@@ -445,7 +452,10 @@ fn probe_dedup(
             continue;
         }
 
-        let abs = store.root.join(&rel);
+        let abs = match safe_join(&store.root, &rel) {
+            Ok(path) => path,
+            Err(_) => continue,
+        };
         let text = match fs::read_to_string(&abs) {
             Ok(t) => t,
             Err(_) => continue,

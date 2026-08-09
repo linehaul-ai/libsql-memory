@@ -17,6 +17,7 @@ mod doctor;
 mod error;
 mod links;
 mod note;
+mod path_safety;
 mod retriever;
 mod slugify;
 mod store;
@@ -32,6 +33,7 @@ pub use doctor::{
 pub use error::{Error, Result};
 pub use links::{extract_wikilinks, Wikilink};
 pub use note::{Note, NoteFrontmatter, NoteType};
+pub use path_safety::safe_join;
 pub use retriever::{
     testing, ContentHit, ContentMatch, FileHit, GrepMode, IndexSnapshot, IndexState, Retriever,
 };

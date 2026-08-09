@@ -11,12 +11,13 @@ list = [
   "No network I/O on the write path, ever.",
   "No index dependency: a store succeeds even if the fff index is cold, corrupt, or absent.",
   "Atomic on disk: write to a temp file in the same directory, fsync, rename over the target.",
+  "Every existing path component below the configured root must be a real file or directory, never a symlink; reads, writes, archives, and deletes reject symlink escapes.",
   "The watcher picks up our own writes like any external edit; the index is eventually consistent with disk.",
 ]
 
 [store_flow]
 steps = [
-  "1. Validate: title non-empty, namespace path is relative and traversal-free, type is an allowed value.",
+  "1. Validate: title non-empty, namespace path is relative, traversal-free, and contains no existing symlink component; type is an allowed value.",
   "2. Slugify title -> candidate slug (kebab-case, ascii, max 60 chars).",
   "3. Dedup probe (best-effort, see [dedup]): fuzzy search titles + aliases in the target namespace.",
   "4a. No near-duplicate -> create new note; set created = updated = today.",
@@ -40,6 +41,10 @@ default is append.
 root = "configurable; default ~/.local/share/fff-memory (XDG) or a project-local .memory/ when run with --project"
 namespaces = "subdirectories under root, arbitrary nesting"
 reserved = [".index/ — fff cache and access log; never contains notes; gitignored", ".archive/ — where doctor moves expired/decayed notes; excluded from default search scope"]
+
+[filesystem_boundary]
+validation = "Before each filesystem operation, every existing relative component through the target is checked with symlink_metadata; recursive walkers skip symlink entries."
+trust_model = "The memory root is locally trusted against hostile concurrent mutation. Component checks stop configured or accidental symlink escapes but are not an openat/openat2 capability boundary; adopt descriptor-relative no-follow operations if adversarial races become a requirement."
 
 [concurrency]
 model = "multiple Claude sessions may share one memory root"

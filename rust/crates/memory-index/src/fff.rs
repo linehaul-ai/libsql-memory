@@ -14,8 +14,8 @@ use fff_search::{
     SharedFilePicker, SharedFrecency, SharedQueryTracker,
 };
 use memory_core::{
-    ensure_index_ignored, ContentHit, ContentMatch, Error, FileHit, GrepMode, IndexSnapshot,
-    IndexState, Note, Result, Retriever,
+    ensure_index_ignored, safe_join, ContentHit, ContentMatch, Error, FileHit, GrepMode,
+    IndexSnapshot, IndexState, Note, Result, Retriever,
 };
 
 /// Default scan wait when opening or reindexing.
@@ -40,7 +40,7 @@ pub struct FffRetriever {
 impl FffRetriever {
     /// Open a memory root, create `.index/` DBs, scan, and wait until ready.
     ///
-    /// Init order (required by fff): frecency → query tracker → FilePicker → wait_for_scan.
+    /// Init order: frecency → query tracker → FilePicker → wait_for_indexing_complete.
     pub fn open(root: impl AsRef<Path>) -> Result<Self> {
         let scan_started = Instant::now();
         let root = root
@@ -49,23 +49,21 @@ impl FffRetriever {
             .map_err(|e| Error::io(root.as_ref().to_path_buf(), e))?;
 
         ensure_index_ignored(&root)?;
-        let index_dir = root.join(".index");
-        std::fs::create_dir_all(index_dir.join("frecency"))
-            .map_err(|e| Error::io(index_dir.join("frecency"), e))?;
-        std::fs::create_dir_all(index_dir.join("queries"))
-            .map_err(|e| Error::io(index_dir.join("queries"), e))?;
+        let (frecency_dir, queries_dir) = index_database_dirs(&root)?;
+        std::fs::create_dir_all(&frecency_dir).map_err(|e| Error::io(&frecency_dir, e))?;
+        std::fs::create_dir_all(&queries_dir).map_err(|e| Error::io(&queries_dir, e))?;
 
         let shared_picker = SharedFilePicker::default();
         let shared_frecency = SharedFrecency::default();
         let shared_query_tracker = SharedQueryTracker::default();
 
-        let frecency = FrecencyTracker::open(index_dir.join("frecency"))
+        let frecency = FrecencyTracker::open(frecency_dir)
             .map_err(|e| Error::Retriever(format!("open frecency db: {e}")))?;
         shared_frecency
             .init(frecency)
             .map_err(|e| Error::Retriever(format!("init frecency: {e}")))?;
 
-        let query_tracker = QueryTracker::open(index_dir.join("queries"))
+        let query_tracker = QueryTracker::open(queries_dir)
             .map_err(|e| Error::Retriever(format!("open query tracker: {e}")))?;
         shared_query_tracker
             .init(query_tracker)
@@ -268,7 +266,7 @@ impl Retriever for FffRetriever {
     }
 
     fn track_access(&self, path: &Path) -> Result<()> {
-        let absolute = self.root.join(path);
+        let absolute = safe_join(&self.root, path)?;
         {
             let guard = self
                 .shared_frecency
@@ -303,8 +301,7 @@ impl Retriever for FffRetriever {
 
     fn reindex(&self) -> Result<()> {
         let scan_started = Instant::now();
-        let frecency_path = self.root.join(".index/frecency");
-        let queries_path = self.root.join(".index/queries");
+        let (frecency_path, queries_path) = index_database_dirs(&self.root)?;
 
         self.shared_frecency
             .destroy()
@@ -342,8 +339,22 @@ fn elapsed_ms(started: Instant) -> u64 {
     started.elapsed().as_millis().clamp(1, u64::MAX as u128) as u64
 }
 
+fn index_database_dirs(root: &Path) -> Result<(PathBuf, PathBuf)> {
+    let frecency = safe_join(root, Path::new(".index/frecency"))?;
+    let queries = safe_join(root, Path::new(".index/queries"))?;
+    for relative in [
+        ".index/frecency/data.mdb",
+        ".index/frecency/lock.mdb",
+        ".index/queries/data.mdb",
+        ".index/queries/lock.mdb",
+    ] {
+        safe_join(root, Path::new(relative))?;
+    }
+    Ok((frecency, queries))
+}
+
 fn open_archive_picker(root: &Path) -> Result<Option<FilePicker>> {
-    let archive = root.join(".archive");
+    let archive = safe_join(root, Path::new(".archive"))?;
     if !archive.is_dir() {
         return Ok(None);
     }

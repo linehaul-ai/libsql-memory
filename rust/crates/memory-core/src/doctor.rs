@@ -13,6 +13,7 @@ use crate::access_log::{AccessLog, CompactionStats, COMPACT_MAX_AGE_DAYS};
 use crate::error::{Error, Result};
 use crate::links::extract_wikilinks;
 use crate::note::{Note, NoteType};
+use crate::path_safety::safe_join;
 use crate::retriever::{IndexState, Retriever};
 use crate::store::MemoryStore;
 
@@ -258,7 +259,12 @@ pub fn run_doctor(
                 Ok(indexed_paths) => {
                     let mut orphaned: Vec<_> = indexed_paths
                         .iter()
-                        .filter(|path| !root.join(path).is_file())
+                        .filter(|path| {
+                            safe_join(root, path)
+                                .ok()
+                                .and_then(|path| fs::symlink_metadata(path).ok())
+                                .is_none_or(|metadata| !metadata.is_file())
+                        })
                         .collect();
                     orphaned.sort();
                     if orphaned.is_empty() {
@@ -358,9 +364,13 @@ fn walk_dir(root: &Path, dir: &Path, out: &mut Vec<(PathBuf, Note)>) -> Result<(
         if name_s == ".index" || name_s == ".archive" {
             continue;
         }
-        if path.is_dir() {
+        let file_type = entry.file_type().map_err(|e| Error::io(&path, e))?;
+        if file_type.is_symlink() {
+            continue;
+        }
+        if file_type.is_dir() {
             walk_dir(root, &path, out)?;
-        } else if path.extension().and_then(|e| e.to_str()) == Some("md") {
+        } else if file_type.is_file() && path.extension().and_then(|e| e.to_str()) == Some("md") {
             let text = fs::read_to_string(&path).map_err(|e| Error::io(&path, e))?;
             // Lenient: doctor must see hand-edited thin-alias notes
             if let Ok(note) = Note::parse_lenient(&text) {

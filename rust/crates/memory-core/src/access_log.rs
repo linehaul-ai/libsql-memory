@@ -499,6 +499,14 @@ impl AccessLog {
         let parent = self.lock_path.parent().unwrap_or_else(|| Path::new("."));
         if let Some(root) = parent.parent() {
             crate::store::ensure_index_ignored(root)?;
+            for path in [
+                ".index",
+                ".index/access.lock",
+                ".index/access.jsonl",
+                ".index/access_counts.json",
+            ] {
+                crate::path_safety::safe_join(root, Path::new(path))?;
+            }
         }
         fs::create_dir_all(parent).map_err(|e| Error::io(parent, e))?;
         let file = OpenOptions::new()

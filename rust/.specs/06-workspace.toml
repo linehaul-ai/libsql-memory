@@ -16,12 +16,12 @@ name = "memory-core"
 kind = "lib"
 owns = [
   "Note type: frontmatter (serde_yaml) + body; parse and serialize",
-  "slugify, namespace validation (traversal-free), atomic write (tempfile + rename)",
+  "slugify, namespace validation, shared traversal/symlink containment checks, atomic write (tempfile + rename)",
   "store flow incl. dedup orchestration (calls Retriever for the probe, best-effort)",
   "access log (append, read, compact)",
   "the Retriever trait (defined here so core depends on an abstraction, not on fff)",
 ]
-deps = ["serde", "serde_yaml", "tempfile", "thiserror", "time"]
+deps = ["fs2", "serde", "serde_json", "serde_yaml", "tempfile", "thiserror", "time"]
 
 [retriever_trait]
 location = "memory-core"
@@ -71,6 +71,7 @@ deps = ["all of the above", "clap"]
 [testing]
 policy = [
   "memory-core: unit tests with a fake Retriever; property tests for slugify/frontmatter round-trip",
+  "filesystem-boundary regressions prove symlinked namespaces cannot write, read, archive, delete, index, or lifecycle-scan outside the configured root",
   "memory-index: integration tests against a real temp dir corpus — includes the prose-scoring validation from 03-retrieval.toml",
   "memory-mcp: golden-file JSON-RPC tests over in-memory IO",
   "one end-to-end smoke test: spawn the binary, initialize, store, search, read — the exact sequence that exposed the predecessor's emptiness",

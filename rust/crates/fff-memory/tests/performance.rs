@@ -9,7 +9,10 @@ use tempfile::tempdir;
 #[test]
 #[ignore = "release-mode performance acceptance gate"]
 fn low_thousands_cold_start_and_warm_search_meet_targets() {
-    assert!(!cfg!(debug_assertions), "run this acceptance gate with --release");
+    assert!(
+        !cfg!(debug_assertions),
+        "run this acceptance gate with --release"
+    );
     let dir = tempdir().unwrap();
     for index in 0..2_000 {
         fs::write(

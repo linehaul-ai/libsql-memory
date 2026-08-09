@@ -81,6 +81,8 @@ stdio_evidence = "a spawned binary test proves initialize, initialized, tools/li
 [errors]
 style = "structured, actionable, never silent; every error names the failing input and a fix"
 example = "namespace 'a/../b' rejected: path traversal; use a relative subtree like 'projects/tms'"
+filesystem_boundary = "Store, read, forget, stats, search-hit loading, archive access, index access, and lifecycle actions never follow symlink components below the configured memory root; direct operations return an actionable path error and recursive reports skip symlink entries."
+filesystem_trust = "This guarantee assumes no hostile concurrent replacement inside the locally trusted root; validation occurs at operation time but is not race-proof like descriptor-relative openat/openat2 with no-follow flags."
 
 [schema_contract]
 aliases = "required array with minItems 2; runtime validation enforces the same minimum"
