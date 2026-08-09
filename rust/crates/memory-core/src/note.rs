@@ -128,10 +128,18 @@ impl Note {
     ///
     /// Expects Obsidian-style delimiters: a leading `---` line, YAML, a closing
     /// `---` line, then the body.
+    /// Parse frontmatter + body and enforce domain validation (store / normal reads).
     pub fn parse(text: &str) -> Result<Self> {
+        let note = Self::parse_lenient(text)?;
+        note.validate()?;
+        Ok(note)
+    }
+
+    /// Parse without domain validation — for doctor/hand-edited notes that may
+    /// violate alias rules but still have readable frontmatter.
+    pub fn parse_lenient(text: &str) -> Result<Self> {
         let (yaml, body) = split_frontmatter(text)?;
         let frontmatter: NoteFrontmatter = serde_yaml::from_str(yaml)?;
-        frontmatter.validate()?;
         Ok(Self {
             frontmatter,
             body: body.to_string(),

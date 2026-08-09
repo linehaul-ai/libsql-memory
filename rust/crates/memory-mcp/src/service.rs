@@ -5,19 +5,17 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use memory_core::{
-    extract_wikilinks, GrepMode, IndexState, MemoryStore, MergeMode, Note, NoteFrontmatter,
-    NoteType, Retriever, StoreAction, StoreInput, StoreOutcome,
-};
-use memory_core::{Error, Result};
-use serde::{Deserialize, Serialize};
-use time::Date;
-
-use crate::access_log::{AccessLog, AccessVia};
 use crate::search::{
     apply_budget, merge_hits, path_to_handle, rank_hits, BudgetedSearch, MatchStage, NoteMeta,
     BUDGET_BYTES_DEFAULT, BUDGET_BYTES_MAX, MIN_RESULTS_FOR_FUZZY, SEARCH_LIMIT_DEFAULT,
 };
+use memory_core::{
+    extract_wikilinks, AccessLog, AccessVia, GrepMode, IndexState, MemoryStore, MergeMode, Note,
+    NoteFrontmatter, NoteType, Retriever, StoreAction, StoreInput, StoreOutcome,
+};
+use memory_core::{Error, Result};
+use serde::{Deserialize, Serialize};
+use time::Date;
 
 /// Options for [`MemoryService::search`].
 #[derive(Debug, Clone)]
@@ -350,13 +348,7 @@ impl MemoryService {
             });
         }
 
-        // Archive: move to `.archive/{namespace}/{slug}.md`
-        let rel = MemoryStore::relative_path(&ns, &slug);
-        let dest = self.store.root().join(".archive").join(&rel);
-        if let Some(parent) = dest.parent() {
-            fs::create_dir_all(parent).map_err(|e| Error::io(parent, e))?;
-        }
-        fs::rename(&abs, &dest).map_err(|e| Error::io(&abs, e))?;
+        self.store.archive_note(&ns, &slug)?;
         Ok(ForgetOutcome {
             handle: MemoryStore::handle(&ns, &slug),
             action: ForgetAction::Archived,
@@ -496,33 +488,9 @@ fn note_type_key(t: NoteType) -> &'static str {
     }
 }
 
-/// Parse `namespace/slug` or `slug` into (namespace, slug).
+/// Parse `namespace/slug` or `slug` (delegates to [`MemoryStore::parse_handle`]).
 pub fn parse_handle(handle: &str) -> Result<(String, String)> {
-    let handle = handle.trim().trim_start_matches('/');
-    if handle.is_empty() {
-        return Err(Error::validation(
-            "handle",
-            "must be non-empty (namespace/slug or slug)",
-        ));
-    }
-    if handle.contains("..") {
-        return Err(Error::validation(
-            "handle",
-            "path traversal rejected; use a relative handle like 'proj/my-note'",
-        ));
-    }
-    let handle = handle.strip_suffix(".md").unwrap_or(handle);
-    if let Some((ns, slug)) = handle.rsplit_once('/') {
-        if slug.is_empty() {
-            return Err(Error::validation("handle", "slug segment is empty"));
-        }
-        if ns.split('/').any(|s| s.is_empty()) {
-            return Err(Error::validation("handle", "namespace has empty segment"));
-        }
-        Ok((ns.to_string(), slug.to_string()))
-    } else {
-        Ok((String::new(), handle.to_string()))
-    }
+    MemoryStore::parse_handle(handle)
 }
 
 fn walk_notes(root: &Path) -> Result<Vec<(PathBuf, Note, u64)>> {

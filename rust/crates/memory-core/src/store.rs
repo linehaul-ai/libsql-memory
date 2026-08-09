@@ -128,6 +128,60 @@ impl MemoryStore {
         Note::parse(&text)
     }
 
+    /// True when the note file exists on disk.
+    pub fn exists(&self, namespace: &str, slug: &str) -> bool {
+        self.absolute_path(namespace, slug).is_file()
+    }
+
+    /// Move a note to `.archive/{namespace}/{slug}.md`. Never hard-deletes.
+    ///
+    /// Used by `memory_forget` (soft) and `doctor --apply`. Recoverable by moving back.
+    pub fn archive_note(&self, namespace: &str, slug: &str) -> Result<PathBuf> {
+        validate_namespace(namespace)?;
+        let abs = self.absolute_path(namespace, slug);
+        if !abs.is_file() {
+            return Err(Error::NotFound {
+                handle: Self::handle(namespace, slug),
+            });
+        }
+        let rel = Self::relative_path(namespace, slug);
+        let dest = self.root.join(".archive").join(&rel);
+        if let Some(parent) = dest.parent() {
+            fs::create_dir_all(parent).map_err(|e| Error::io(parent, e))?;
+        }
+        fs::rename(&abs, &dest).map_err(|e| Error::io(&abs, e))?;
+        Ok(dest)
+    }
+
+    /// Parse `namespace/slug` or `slug` into (namespace, slug).
+    pub fn parse_handle(handle: &str) -> Result<(String, String)> {
+        let handle = handle.trim().trim_start_matches('/');
+        if handle.is_empty() {
+            return Err(Error::validation(
+                "handle",
+                "must be non-empty (namespace/slug or slug)",
+            ));
+        }
+        if handle.contains("..") {
+            return Err(Error::validation(
+                "handle",
+                "path traversal rejected; use a relative handle like 'proj/my-note'",
+            ));
+        }
+        let handle = handle.strip_suffix(".md").unwrap_or(handle);
+        if let Some((ns, slug)) = handle.rsplit_once('/') {
+            if slug.is_empty() {
+                return Err(Error::validation("handle", "slug segment is empty"));
+            }
+            if ns.split('/').any(|s| s.is_empty()) {
+                return Err(Error::validation("handle", "namespace has empty segment"));
+            }
+            Ok((ns.to_string(), slug.to_string()))
+        } else {
+            Ok((String::new(), handle.to_string()))
+        }
+    }
+
     /// Store or update a note. Dedup uses `retriever` when `Some` and ready; never fails for index reasons.
     pub fn store(
         &self,

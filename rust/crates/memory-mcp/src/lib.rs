@@ -8,12 +8,12 @@
 
 #![deny(missing_docs)]
 
-mod access_log;
 mod search;
 mod server;
 mod service;
 
-pub use access_log::{AccessEvent, AccessLog, AccessVia};
+// Access log lives in memory-core (spec 05 / 06); re-export for callers.
+pub use memory_core::{AccessEvent, AccessLog, AccessVia};
 pub use search::{
     apply_budget, merge_hits, rank_hits, type_boost, BudgetedSearch, MatchStage, MergedHit,
     MoreHit, RankedHit, SearchHit, StageName, BOTH_STAGES_BONUS, BUDGET_BYTES_DEFAULT,

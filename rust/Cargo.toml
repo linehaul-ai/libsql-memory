@@ -1,6 +1,11 @@
 [workspace]
 resolver = "2"
-members = ["crates/memory-core", "crates/memory-index", "crates/memory-mcp"]
+members = [
+    "crates/memory-core",
+    "crates/memory-index",
+    "crates/memory-mcp",
+    "crates/fff-memory",
+]
 
 [workspace.package]
 version = "0.1.0"
@@ -10,7 +15,10 @@ repository = "https://github.com/fakebizprez/libsql-memory"
 
 [workspace.dependencies]
 memory-core = { path = "crates/memory-core" }
+memory-index = { path = "crates/memory-index" }
+memory-mcp = { path = "crates/memory-mcp" }
 fff-search = "=0.10.3"
+clap = { version = "4", features = ["derive", "env"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"

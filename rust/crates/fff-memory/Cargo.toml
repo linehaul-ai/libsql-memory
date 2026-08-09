@@ -1,0 +1,19 @@
+[package]
+name = "fff-memory"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "CLI for fff-memory: doctor, reindex, and lifecycle tools"
+repository.workspace = true
+
+[[bin]]
+name = "fff-memory"
+path = "src/main.rs"
+
+[dependencies]
+memory-core = { workspace = true }
+memory-index = { workspace = true }
+clap = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
