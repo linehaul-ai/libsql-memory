@@ -16,7 +16,8 @@ stages = [
   "6. Shape output under the token budget (see [output]).",
 ]
 scope = "namespace argument narrows to a subtree; absent = whole root; .archive/ excluded unless include_archived = true"
-scope_application = "namespace constraints are applied inside fff before pagination; archived search uses a short-lived synchronous picker rooted at .archive/ and restores the .archive/ storage prefix only on returned paths"
+scope_application = "namespace constraints use a root-anchored namespace/** glob inside fff before pagination; archived search uses a short-lived synchronous picker rooted at .archive/ and restores the .archive/ storage prefix only on returned paths"
+archive_collisions = "active and archived storage paths dedupe by logical namespace/slug; the active note wins when both exist"
 
 [ranking]
 match_score = "each backend result page normalizes its native score to 0.0..=1.0 before merge; merged notes take the max component plus the both-stages bonus"
@@ -57,4 +58,4 @@ most of what one-shot semantic similarity provided.
 """
 
 [read_tool]
-memory_read = "takes namespace/slug, returns full frontmatter + body; records an access event (reinforcement); may include one-hop [[link]] titles as breadcrumbs (phase 3)"
+memory_read = "takes namespace/slug, prefers the active note and falls back to the archived note when active is absent; returns full frontmatter + body; records an access event (reinforcement); may include one-hop [[link]] titles as breadcrumbs (phase 3)"

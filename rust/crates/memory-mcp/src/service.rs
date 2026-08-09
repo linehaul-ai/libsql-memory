@@ -317,7 +317,7 @@ impl MemoryService {
     /// Read full note; records a read access event.
     pub fn read(&self, handle: &str) -> Result<ReadOutcome> {
         let (ns, slug) = parse_handle(handle)?;
-        let note = self.store.read(&ns, &slug)?;
+        let note = self.read_active_or_archived(&ns, &slug)?;
         let handle_norm = MemoryStore::handle(&ns, &slug);
         let _ = self.access.append(&handle_norm, AccessVia::Read);
 
@@ -341,6 +341,30 @@ impl MemoryService {
             body: note.body,
             linked,
         })
+    }
+
+    fn read_active_or_archived(&self, namespace: &str, slug: &str) -> Result<Note> {
+        match self.store.read(namespace, slug) {
+            Ok(note) => Ok(note),
+            Err(Error::NotFound { .. }) => {
+                let path = self
+                    .store
+                    .root()
+                    .join(".archive")
+                    .join(MemoryStore::relative_path(namespace, slug));
+                let text = fs::read_to_string(&path).map_err(|e| {
+                    if e.kind() == std::io::ErrorKind::NotFound {
+                        Error::NotFound {
+                            handle: MemoryStore::handle(namespace, slug),
+                        }
+                    } else {
+                        Error::io(&path, e)
+                    }
+                })?;
+                Note::parse(&text)
+            }
+            Err(error) => Err(error),
+        }
     }
 
     /// Archive (default) or hard-delete a note.
@@ -731,6 +755,59 @@ mod tests {
             .expect("archived search");
 
         assert_eq!(response.results[0].handle, "proj/old");
+        let read = svc
+            .read(&response.results[0].handle)
+            .expect("read archived search result");
+        assert_eq!(read.frontmatter.title, "Old Note");
+        assert_eq!(read.body.trim(), "retired body");
+    }
+
+    #[test]
+    fn active_and_archived_collision_returns_one_active_result() {
+        let dir = tempdir().unwrap();
+        seed_note(
+            dir.path(),
+            "proj/same.md",
+            "Active Note",
+            &["current note", "live note"],
+            "active body",
+        );
+        seed_note(
+            dir.path(),
+            ".archive/proj/same.md",
+            "Archived Note",
+            &["retired note", "old note"],
+            "archived body",
+        );
+        let fake = FakeRetriever {
+            state: IndexState::Ready,
+            files: Mutex::new(vec![
+                FileHit {
+                    path: PathBuf::from(".archive/proj/same.md"),
+                    score: 1.0,
+                },
+                FileHit {
+                    path: PathBuf::from("proj/same.md"),
+                    score: 0.5,
+                },
+            ]),
+            ..FakeRetriever::ready()
+        };
+        let svc = MemoryService::new(dir.path(), Some(Arc::new(fake)));
+
+        let response = svc
+            .search(SearchOptions {
+                query: "same".into(),
+                namespace: Some("proj".into()),
+                include_archived: true,
+                ..Default::default()
+            })
+            .expect("collision search");
+
+        assert_eq!(response.results.len(), 1, "response={response:?}");
+        assert_eq!(response.results[0].handle, "proj/same");
+        assert_eq!(response.results[0].title, "Active Note");
+        assert_eq!(svc.read("proj/same").unwrap().body.trim(), "active body");
     }
 
     struct BarrierRetriever {

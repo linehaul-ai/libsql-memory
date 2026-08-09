@@ -115,7 +115,7 @@ pub struct BudgetedSearch {
     pub empty_hint: Option<String>,
 }
 
-/// Merge path and content hits; dedupe by path; both-stages bonus.
+/// Merge path and content hits; dedupe by logical path; prefer active over archived.
 pub fn merge_hits(
     file_hits: &[(PathBuf, f32)],
     plain_hits: &[(PathBuf, f32, String)],
@@ -173,9 +173,25 @@ fn upsert(
     why: String,
 ) {
     use std::collections::hash_map::Entry;
-    match map.entry(path.clone()) {
+    let logical = logical_path(&path);
+    match map.entry(logical) {
         Entry::Occupied(mut e) => {
             let hit = e.get_mut();
+            let hit_archived = is_archived(&hit.path);
+            let incoming_archived = is_archived(&path);
+            if !hit_archived && incoming_archived {
+                return;
+            }
+            if hit_archived && !incoming_archived {
+                *hit = MergedHit {
+                    path,
+                    match_score: score,
+                    stages: vec![stage],
+                    snippet,
+                    why_parts: if why.is_empty() { vec![] } else { vec![why] },
+                };
+                return;
+            }
             let had_file = hit.stages.contains(&MatchStage::FindFiles);
             let had_grep = hit
                 .stages
@@ -218,6 +234,14 @@ fn upsert(
             });
         }
     }
+}
+
+fn is_archived(path: &Path) -> bool {
+    path.starts_with(".archive")
+}
+
+fn logical_path(path: &Path) -> PathBuf {
+    path.strip_prefix(".archive").unwrap_or(path).to_path_buf()
 }
 
 fn why_from_path(path: &Path) -> String {
@@ -349,9 +373,9 @@ pub struct NoteMeta {
 
 /// Convert `ns/slug.md` → `ns/slug`.
 pub fn path_to_handle(path: &Path) -> String {
-    let s = path.to_string_lossy().replace('\\', "/");
-    let logical = s.strip_prefix(".archive/").unwrap_or(&s);
-    logical.strip_suffix(".md").unwrap_or(logical).to_string()
+    let logical = logical_path(path);
+    let s = logical.to_string_lossy().replace('\\', "/");
+    s.strip_suffix(".md").unwrap_or(&s).to_string()
 }
 
 /// Shape ranked hits under limit and byte budget; empty results get a hint.

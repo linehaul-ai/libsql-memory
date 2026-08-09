@@ -313,8 +313,11 @@ fn find_in_picker(
     prefix: Option<&Path>,
 ) -> Vec<FileHit> {
     let mut parsed = QueryParser::default().parse(query);
-    if let Some(scope) = scope.filter(|s| !s.is_empty()) {
-        parsed.constraints.push(Constraint::PathSegment(scope));
+    let scope_glob = scope
+        .filter(|s| !s.is_empty())
+        .map(|scope| format!("{scope}/**"));
+    if let Some(scope_glob) = scope_glob.as_deref() {
+        parsed.constraints.push(Constraint::Glob(scope_glob));
     }
     let results = picker.fuzzy_search(
         &parsed,
@@ -353,8 +356,11 @@ fn grep_in_picker(
     prefix: Option<&Path>,
 ) -> Vec<ContentHit> {
     let mut parsed = parse_grep_query(query);
-    if let Some(scope) = scope.filter(|s| !s.is_empty()) {
-        parsed.constraints.push(Constraint::PathSegment(scope));
+    let scope_glob = scope
+        .filter(|s| !s.is_empty())
+        .map(|scope| format!("{scope}/**"));
+    if let Some(scope_glob) = scope_glob.as_deref() {
+        parsed.constraints.push(Constraint::Glob(scope_glob));
     }
     let mut hits = Vec::new();
     let mut file_offset = 0;

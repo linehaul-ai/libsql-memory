@@ -174,7 +174,7 @@ fn scope_is_applied_before_find_pagination() {
     let dir = tempdir().unwrap();
     write_note(dir.path(), "wanted/needel.md", "needle");
     for i in 0..60 {
-        write_note(dir.path(), &format!("wanted-noise-{i}/needle.md"), "needle");
+        write_note(dir.path(), &format!("other-{i}/wanted/needle.md"), "needle");
     }
     let r = open_ready(dir.path());
 
