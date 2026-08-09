@@ -1,0 +1,52 @@
+# Spec 02 — Write Path
+# Storing must be dumb-simple and unable to fail for search-related reasons.
+
+[spec]
+id = "write-path"
+version = "0.1.0"
+status = "draft"
+
+[invariants]
+list = [
+  "No network I/O on the write path, ever.",
+  "No index dependency: a store succeeds even if the fff index is cold, corrupt, or absent.",
+  "Atomic on disk: write to a temp file in the same directory, fsync, rename over the target.",
+  "The watcher picks up our own writes like any external edit; the index is eventually consistent with disk.",
+]
+
+[store_flow]
+steps = [
+  "1. Validate: title non-empty, namespace path is relative and traversal-free, type is an allowed value.",
+  "2. Slugify title -> candidate slug (kebab-case, ascii, max 60 chars).",
+  "3. Dedup probe (best-effort, see [dedup]): fuzzy search titles + aliases in the target namespace.",
+  "4a. No near-duplicate -> create new note; set created = updated = today.",
+  "4b. Near-duplicate found -> update that note: merge body per [dedup.update_semantics], union aliases and tags, bump updated.",
+  "5. Serialize frontmatter + body, atomic write.",
+  "6. Return { slug, namespace, action: created|updated, dedup_hit: slug|none }.",
+]
+
+[dedup]
+probe = "fffind + fuzzy grep over title and aliases lines, scoped to the target namespace"
+threshold = "conservative: only treat as duplicate on a strong title/alias match; when in doubt, create a new note (a stray duplicate is cheaper than a wrong merge)"
+best_effort = "If the index is unavailable, skip the probe entirely and create the note. Dedup is an optimization, never a gate."
+update_semantics = """
+On update: replace the body only when the new content supersedes (same fact,
+newer state); append a dated addendum section when it augments. The storing
+agent chooses via an explicit 'mode' argument (replace|append) on memory_store;
+default is append.
+"""
+
+[directory_layout]
+root = "configurable; default ~/.local/share/fff-memory (XDG) or a project-local .memory/ when run with --project"
+namespaces = "subdirectories under root, arbitrary nesting"
+reserved = [".index/ — fff cache and access log; never contains notes; gitignored", ".archive/ — where doctor moves expired/decayed notes; excluded from default search scope"]
+
+[concurrency]
+model = "multiple Claude sessions may share one memory root"
+safety = "file-per-note + atomic rename = last-writer-wins per note; no cross-file transactions exist to break"
+watcher = "external edits (humans, other sessions, git pulls) are indexed automatically by the fff watcher"
+
+[git]
+stance = "the memory root is expected (not required) to be a git repo; git is the history, review, and sync layer"
+tooling = "we never shell out to git ourselves in v1; the user commits. doctor may print a suggested commit message."
+gitignore = ".index/ is always ignored"

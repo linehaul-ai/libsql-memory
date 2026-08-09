@@ -1,0 +1,73 @@
+# Spec 04 — MCP Interface
+# Five tools, stdio transport, JSON-RPC 2.0. Small on purpose.
+
+[spec]
+id = "mcp-interface"
+version = "0.1.0"
+status = "draft"
+
+[server]
+transport = "stdio"
+protocol = "MCP JSON-RPC 2.0"
+sdk = "official Rust MCP SDK (rmcp) — do not hand-roll the protocol layer like the predecessor did"
+logging = "stderr only; stdout is reserved for the protocol"
+name = "fff-memory"
+
+# --- Tools ---
+
+[[tool]]
+name = "memory_store"
+summary = "Store or update a memory. Never fails for search-related reasons."
+args = [
+  "title: string (required)",
+  "body: string (required)",
+  "aliases: string[] (required, min 2) — synonyms/alternate phrasings a future query might use",
+  "namespace: string (default 'default')",
+  "type: fact|decision|preference|lesson|reference|session-summary (required)",
+  "tags: string[] (optional)",
+  "expires: YYYY-MM-DD (optional)",
+  "mode: append|replace (default append) — how to merge if dedup finds an existing note",
+]
+returns = "{ slug, namespace, action: created|updated, dedup_hit }"
+description_guidance = "Tool description must instruct the model to write aliases in the vocabulary of future questions, not restatements of the title."
+
+[[tool]]
+name = "memory_search"
+summary = "Layered lexical search (see 03-retrieval.toml). Returns ranked snippets with handles and a 'why' per result."
+args = [
+  "query: string (required)",
+  "namespace: string (optional; absent = all)",
+  "limit: int (default 8)",
+  "budget_bytes: int (default 4096, max 16384)",
+  "include_archived: bool (default false)",
+]
+returns = "{ results: [{ handle, title, snippet, why, score }], more: [handle+title], stages_run, scope }"
+description_guidance = "Description encourages 2-3 reformulations before concluding no memory exists."
+
+[[tool]]
+name = "memory_read"
+summary = "Fetch one full note by handle; records an access event (frecency reinforcement)."
+args = ["handle: string 'namespace/slug' (required)"]
+returns = "{ frontmatter, body, linked: [handle+title] }"
+
+[[tool]]
+name = "memory_forget"
+summary = "Archive (default) or hard-delete a note."
+args = [
+  "handle: string (required)",
+  "hard: bool (default false) — false moves to .archive/, true removes the file",
+]
+returns = "{ handle, action: archived|deleted }"
+
+[[tool]]
+name = "memory_stats"
+summary = "Store health: counts by namespace and type, disk size, index status, access-log summary, notes nearing expiry."
+args = ["namespace: string (optional)"]
+returns = "{ total_notes, by_namespace, by_type, disk_bytes, index: {state, files_indexed, last_scan_ms}, decay: {never_accessed_30d, expiring_soon} }"
+
+[cli]
+note = "Same binary, subcommands mirror the tools 1:1 plus lifecycle commands: fff-memory serve|store|search|read|forget|stats|doctor|reindex. CLI exists for humans and hooks; serve is what .mcp.json launches."
+
+[errors]
+style = "structured, actionable, never silent; every error names the failing input and a fix"
+example = "namespace 'a/../b' rejected: path traversal; use a relative subtree like 'projects/tms'"

@@ -1,0 +1,70 @@
+# Spec 00 — Project Overview
+# Agent memory built around fff (github.com/dmtrkovalenko/fff), written in Rust.
+
+[spec]
+id = "overview"
+version = "0.1.0"
+status = "draft"
+date = "2026-08-08"
+
+[project]
+name = "fff-memory"          # working name, subject to change
+language = "rust"
+predecessor = "libsql-memory (Go + LibSQL + embeddings) — abandoned; see [lessons]"
+
+[thesis]
+summary = """
+Write smart, search cheap. The agent writing a memory is an LLM — it performs
+the semantic work once, at write time (title, aliases, tags, summary).
+Query time then needs only lexical search, which fff provides in microseconds
+with zero external dependencies. This inverts the predecessor design, which
+spent infrastructure at query time (a live embedding model) to compensate for
+dumb write time (raw text blobs), and died when that infrastructure was down.
+"""
+
+[principles]
+list = [
+  "Files are the source of truth; the search index is a disposable cache, rebuildable from disk in one scan.",
+  "Storing a memory must never fail because a search feature is unavailable. The write path has zero network and zero index dependencies.",
+  "Spend intelligence at write time, not infrastructure at query time.",
+  "Token economy is the real cost metric: optimize relevant-tokens-per-injected-token, not storage or raw speed.",
+  "Small tool surface: five tools, no more. Agents fumble wide tool surfaces.",
+  "Human-inspectable always: cat, edit, grep, and git the memory store with no tooling.",
+  "Retrieval must be explainable: every result carries a reason (matched field, score breakdown, frecency).",
+  "Thin hooks: each automation hook makes one tool call; the tool owns all logic.",
+]
+
+[architecture]
+headline = """
+One Rust binary that is both an MCP stdio server and a CLI. It embeds the fff
+crates (fff-search, fff-grep, fff-query-parser) directly as library
+dependencies — no sidecar fff-mcp process, no IPC hop. Memory notes are
+markdown files with YAML frontmatter in a watched directory tree.
+"""
+retrieval_backend = "fff crates behind a small Retriever trait (see 06-workspace.toml), keeping the backend swappable and insulating against upstream API churn."
+
+[non_goals]
+list = [
+  "Embeddings or vector search (may return later as an optional re-ranker behind the Retriever trait; never as the required path).",
+  "Any server/daemon mode beyond MCP-over-stdio.",
+  "Multi-user or remote anything.",
+  "Sync services (git is the sync layer).",
+  "Reusing any code from the Go implementation.",
+]
+
+[success_metrics]
+p50_search_latency_ms = 10        # upper bound, embedded index, warm
+cold_start_seconds = 1.0          # upper bound at low-thousands of notes
+write_failure_modes = 0           # by construction: no network, no index dependency on write
+subjective = "The user stops manually re-explaining their projects to Claude."
+decay_health = "Percentage of notes never accessed 30 days after creation trends down after doctor sweeps."
+
+[lessons]
+# Encoded so the failure modes of the predecessor stay designed-out.
+from_predecessor = [
+  "Write path depended on a LAN embedding server; when it was down, zero rows were ever stored.",
+  "Default similarity threshold (0.7) silently filtered correct matches; retrieval failed with no feedback.",
+  "Six tools across four duplicate type representations; adapter code dwarfed logic.",
+  "Automation hooks were deleted in frustration; without them the tools sat idle. Hooks must be trivial to keep alive.",
+  "52 MB of committed binaries and dead code (unwired vector index, stub entry point) accumulated in two days.",
+]

@@ -1,0 +1,80 @@
+# Spec 06 — Rust Workspace Layout
+# One binary; library crates split by responsibility so the retrieval backend stays swappable.
+
+[spec]
+id = "workspace"
+version = "0.1.0"
+status = "draft"
+
+[workspace]
+root = "rust/"
+resolver = "2"
+members = ["crates/memory-core", "crates/memory-index", "crates/memory-mcp", "crates/fff-memory"]
+
+[[crate]]
+name = "memory-core"
+kind = "lib"
+owns = [
+  "Note type: frontmatter (serde_yaml) + body; parse and serialize",
+  "slugify, namespace validation (traversal-free), atomic write (tempfile + rename)",
+  "store flow incl. dedup orchestration (calls Retriever for the probe, best-effort)",
+  "access log (append, read, compact)",
+  "the Retriever trait (defined here so core depends on an abstraction, not on fff)",
+]
+deps = ["serde", "serde_yaml", "tempfile", "thiserror", "time"]
+
+[retriever_trait]
+location = "memory-core"
+sketch = '''
+pub trait Retriever {
+    fn find_files(&self, query: &str, scope: Option<&str>) -> Result<Vec<FileHit>>;
+    fn grep(&self, query: &str, mode: GrepMode, scope: Option<&str>) -> Result<Vec<ContentHit>>;
+    fn index_state(&self) -> IndexState;
+    fn reindex(&self) -> Result<()>;
+}
+'''
+rationale = """
+fff is a young, single-maintainer project: pin its version and confine it to
+one crate. The trait also leaves the door open for an optional embedding
+re-ranker later without touching the write path, and makes memory-core
+testable with an in-memory fake."""
+
+[[crate]]
+name = "memory-index"
+kind = "lib"
+owns = [
+  "FffRetriever: the only code that imports fff crates",
+  "watcher lifecycle, warm-up (ai_mode), scan-complete waiting",
+  "score extraction and normalization into backend-neutral FileHit/ContentHit",
+]
+deps = ["memory-core", "fff-search (single crate, pinned exact version; grep is a module and fff-query-parser types are re-exported at its root; default 'ripgrep' walker feature)"]
+
+[[crate]]
+name = "memory-mcp"
+kind = "lib"
+owns = [
+  "MCP server over stdio via the official rmcp SDK — protocol layer is not hand-rolled",
+  "the five tool implementations: thin adapters over memory-core (see 04-mcp-interface.toml)",
+  "retrieval pipeline merge/rank/budget stages (03-retrieval.toml steps 4-6)",
+]
+deps = ["memory-core", "rmcp", "serde_json", "tokio"]
+
+[[crate]]
+name = "fff-memory"
+kind = "bin"
+owns = ["clap CLI: serve | store | search | read | forget | stats | doctor | reindex", "config resolution: flags > env (FFF_MEMORY_*) > config file > defaults", "wires memory-index's FffRetriever into memory-core + memory-mcp"]
+deps = ["all of the above", "clap"]
+
+[testing]
+policy = [
+  "memory-core: unit tests with a fake Retriever; property tests for slugify/frontmatter round-trip",
+  "memory-index: integration tests against a real temp dir corpus — includes the prose-scoring validation from 03-retrieval.toml",
+  "memory-mcp: golden-file JSON-RPC tests over in-memory IO",
+  "one end-to-end smoke test: spawn the binary, initialize, store, search, read — the exact sequence that exposed the predecessor's emptiness",
+  "no test may require network or Docker",
+]
+
+[hygiene]
+gitignore = ["target/", ".index/", "*.db"]
+rule = "no committed binaries, ever (predecessor accumulated 52 MB of them)"
+docs = "each crate has a lib.rs doc-comment stating its single responsibility"

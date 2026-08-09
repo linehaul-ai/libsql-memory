@@ -1,0 +1,13 @@
+[package]
+name = "memory-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Note format, slugify, atomic store, access log, and Retriever trait for fff-memory"
+repository.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_yaml = { workspace = true }
+thiserror = { workspace = true }
+time = { workspace = true }

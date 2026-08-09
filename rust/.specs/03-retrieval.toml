@@ -1,0 +1,59 @@
+# Spec 03 — Retrieval Pipeline
+# One search tool, layered lexical retrieval, frecency-aware ranking, token-budgeted output.
+
+[spec]
+id = "retrieval"
+version = "0.1.0"
+status = "draft"
+
+[pipeline]
+stages = [
+  "1. Parse query with fff-query-parser.",
+  "2. Run in parallel: (a) fffind over paths/slugs (titles are slugs, so this is title search); (b) plain-mode grep over note content — frontmatter included, so aliases and tags match here.",
+  "3. Escalate: if merged results < min_results (default 3), rerun grep in fuzzy mode.",
+  "4. Merge and dedupe by (namespace, slug); a note matching in both stages takes the max component score plus a both-stages bonus.",
+  "5. Rank: final = match_score * frecency_multiplier (see [ranking]).",
+  "6. Shape output under the token budget (see [output]).",
+]
+scope = "namespace argument narrows to a subtree; absent = whole root; .archive/ excluded unless include_archived = true"
+
+[ranking]
+match_score = "from fff Score.total (base + filename bonus + exact-match, etc.)"
+frecency_multiplier = "derived from the access log (see 05-lifecycle.toml); recently/frequently retrieved notes rank higher"
+type_boosts = "small static boosts: preference and decision outrank session-summary at equal match score"
+prose_caveat = """
+fff scoring heuristics are code-tuned (definition classification, filename
+bonuses). Unvalidated on prose. We keep our own thin re-rank layer (steps 4-5)
+on top of raw fff scores precisely so we can correct for this after dogfooding
+without touching the search stages.
+"""
+
+[output]
+philosophy = "snippet-first, expand-on-demand; the context window is the scarce resource"
+budget_bytes_default = 4096
+budget_bytes_max = 16384
+per_result = [
+  "namespace/slug (the handle for memory_read)",
+  "title",
+  "snippet: first matching line(s) with minimal context, not the whole body",
+  "why: one compact line, e.g. 'alias:shipping +frecency(6 reads/30d)' — explainable retrieval",
+  "score",
+]
+overflow = "results beyond the budget are returned as bare slug+title lines under a 'more' key"
+no_silent_empty = """
+An empty result set must say what was tried: stages run, scope searched, and a
+hint ('try broader terms or namespace=\"\"'). The predecessor failed silently
+past its threshold; this design treats empty results as a reportable outcome,
+never a silent one.
+"""
+
+[iterability]
+note = """
+Lexical search is iterable by design: the agent can reformulate and re-query
+cheaply (microseconds, no API cost). Tool description should encourage 2-3
+query variants before concluding a memory does not exist. This loop replaces
+most of what one-shot semantic similarity provided.
+"""
+
+[read_tool]
+memory_read = "takes namespace/slug, returns full frontmatter + body; records an access event (reinforcement); may include one-hop [[link]] titles as breadcrumbs (phase 3)"

@@ -1,0 +1,53 @@
+# Spec 07 — Hooks & Automation
+# The layer whose deletion killed the predecessor. Design rule: hooks so thin they never need fixing.
+
+[spec]
+id = "hooks-automation"
+version = "0.1.0"
+status = "draft"
+
+[philosophy]
+rules = [
+  "Each hook makes at most one tool call with clear skip conditions stated in 1-3 lines.",
+  "All logic (slugging, frontmatter, dedup, alias generation guidance) lives in the memory_store tool and the skill, never in hook prompts.",
+  "A broken or removed hook degrades to manual tool use; it never breaks storage or search.",
+  "Ship hooks as versioned files in the plugin; the predecessor's were hand-edited into settings and deleted in frustration.",
+]
+
+[[hook]]
+event = "SessionStart"
+action = "memory_search for the current project's namespace; inject top hits as brief context"
+skip = "no memory root configured, or empty store"
+
+[[hook]]
+event = "UserPromptSubmit"
+action = "memory_search with 2-3 key terms from the prompt; inject only results above a floor score, capped at ~500 tokens"
+skip = "prompt under 20 chars, slash commands, greetings"
+
+[[hook]]
+event = "Stop"
+action = "one memory_store of type session-summary IF the session made substantive decisions or discoveries; otherwise nothing"
+skip = "trivial sessions; anything already stored during the session"
+
+[deliberately_absent]
+pre_tool_use = "predecessor fired a memory search before every Write/Edit — per-edit latency and noise for marginal recall; the UserPromptSubmit search already covers intent"
+post_tool_use = "storing after every edit produced hoarding pressure; the Stop summary and in-session explicit stores capture what matters"
+
+[skill]
+name = "memory-usage"
+purpose = """
+The alias-quality discipline lives here, not in hooks: when to store, what
+makes good aliases (future-question vocabulary, not title restatements), one
+fact per note, when to update vs create, namespace conventions. The skill is
+part of the product surface — recall quality depends on it (see 01-note-format
+aliases notes)."""
+
+[commands]
+list = [
+  "/memory-status -> memory_stats formatted for humans",
+  "/memory-doctor -> runs doctor (report only) and shows the result",
+]
+
+[plugin_packaging]
+distribution = "Claude Code plugin: .mcp.json launches 'fff-memory serve'; hooks + skill + commands ship in the plugin directory"
+portability = "no absolute paths in any shipped config (predecessor's .mcp.json hardcoded /Users/fakebizprez/...); use ${CLAUDE_PLUGIN_ROOT} and a small launcher only if the variable cannot expand in args"

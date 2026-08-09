@@ -1,0 +1,104 @@
+# Spec 01 — Note Format
+# One memory = one markdown file with YAML frontmatter.
+
+[spec]
+id = "note-format"
+version = "0.1.0"
+status = "draft"
+
+[file]
+extension = ".md"
+encoding = "utf-8"
+naming = "kebab-case slug derived from title; the filename stem is the note's ID within its namespace"
+example_path = "linehaul/tms/deploy-pipeline-github-actions.md"
+frontmatter = "YAML, delimited by --- lines, at top of file (Obsidian-compatible)"
+
+[identity]
+id = "slug (filename stem); unique within namespace"
+namespace = "the directory path relative to the memory root; nested namespaces are nested directories"
+collision_rule = "storing to an existing (namespace, slug) updates that note (see 02-write-path.toml dedup rules)"
+
+# --- Frontmatter fields ---
+
+[[field]]
+name = "title"
+type = "string"
+required = true
+notes = "Human-readable one-line summary. Heavily weighted in retrieval (fffind matches on it via slug; grep matches it in frontmatter)."
+
+[[field]]
+name = "aliases"
+type = "string[]"
+required = true
+notes = """
+The semantic-search replacement and the load-bearing field of the whole design.
+The storing agent generates synonyms and alternate phrasings at write time
+('shipping cadence', 'release frequency', 'CI/CD') so lexical search finds the
+note under vocabulary the future query will actually use. Minimum 2, aim 3-6.
+"""
+
+[[field]]
+name = "tags"
+type = "string[]"
+required = false
+notes = "Categorical labels (infra, testing, preference). Filterable via plain grep on the frontmatter line."
+
+[[field]]
+name = "type"
+type = "string"
+required = true
+allowed = ["fact", "decision", "preference", "lesson", "reference", "session-summary"]
+notes = "What kind of memory this is; used by retrieval boosts and doctor policies (e.g. session-summaries decay faster)."
+
+[[field]]
+name = "created"
+type = "date (YYYY-MM-DD)"
+required = true
+
+[[field]]
+name = "updated"
+type = "date (YYYY-MM-DD)"
+required = true
+notes = "Touched on every content update. Never on read."
+
+[[field]]
+name = "expires"
+type = "date (YYYY-MM-DD) or absent"
+required = false
+notes = "TTL replacement. The doctor sweep archives notes past this date (see 05-lifecycle.toml). Absent means no expiry."
+
+[[field]]
+name = "source"
+type = "string"
+required = false
+notes = "Provenance: session id, conversation reference, or 'manual'."
+
+[body]
+format = "markdown prose"
+guidance = """
+Lead with the fact itself in the first sentence — retrieval returns snippets,
+and the first lines are what the agent sees. For decisions and lessons include
+a short Why. Keep one memory per file; if a note grows multiple unrelated
+facts, split it.
+"""
+
+[links]
+syntax = "[[slug]] wikilinks to other notes, same-namespace first, else namespace-qualified [[ns/slug]]"
+unresolved = "A link to a nonexistent slug is legal — it marks a memory worth writing, not an error."
+retrieval_use = "Phase 3+: results may include one-hop linked note titles as breadcrumbs (associative recall)."
+
+[example]
+content = '''
+---
+title: Deploy pipeline uses GitHub Actions + Docker
+aliases: [release process, CI/CD, shipping, how we deploy]
+tags: [infra, deployment]
+type: fact
+created: 2026-08-08
+updated: 2026-08-08
+source: session e32af3d7
+---
+The deployment pipeline builds in GitHub Actions and publishes Docker images.
+Rollbacks are re-deploys of the previous tag.
+Related: [[docker-registry-auth]]
+'''

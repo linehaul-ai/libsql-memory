@@ -1,0 +1,97 @@
+# Spec 08 — Roadmap, Risks, Open Questions
+
+[spec]
+id = "roadmap"
+version = "0.1.0"
+status = "draft"
+
+# --- Phases ---
+
+[[phase]]
+n = 1
+name = "Core loop, dogfood immediately"
+scope = [
+  "memory-core: note format, atomic store, slugify, access log",
+  "memory-index: FffRetriever over the fff crates",
+  "memory-mcp: memory_store / memory_search / memory_read over rmcp",
+  "fff-memory bin: serve + store + search + read subcommands",
+  "end-to-end smoke test in CI",
+]
+exit_criteria = "Real memories stored and retrieved in daily Claude Code use; retrieval *feel* judged on a corpus of 20+ hand-written notes. Feel cannot be computed — this phase exists to measure it."
+
+[[phase]]
+n = 2
+name = "Automation & write quality"
+scope = [
+  "dedup-on-write probe with append|replace modes",
+  "memory_forget + memory_stats",
+  "hooks (SessionStart, UserPromptSubmit, Stop) + memory-usage skill + plugin packaging",
+  "alias-quality validation in doctor",
+]
+exit_criteria = "Memory accumulates and surfaces without manual tool calls across one week of real sessions."
+
+[[phase]]
+n = 3
+name = "Lifecycle & polish"
+scope = [
+  "doctor decay sweeps + .archive/ + access-log compaction",
+  "wikilink breadcrumbs in memory_read",
+  "explainable-'why' refinement from dogfood feedback; prose re-rank corrections",
+  "stats decay-health metrics; git commit-message suggestions",
+]
+exit_criteria = "Store stays healthy unattended: decay candidates surface, archive works, no hoarding."
+
+# --- Risks ---
+
+[[risk]]
+id = "R-1"
+name = "fff is young and single-maintainer"
+mitigation = "pin exact versions; confine all fff imports to memory-index; Retriever trait keeps the backend swappable; vendor the crates if upstream churn bites"
+
+[[risk]]
+id = "R-2"
+name = "fff scoring is code-tuned, corpus is prose markdown"
+mitigation = "own re-rank layer on top of raw scores; phase-1 dogfooding validates on real notes before any automation is layered on"
+
+[[risk]]
+id = "R-3"
+name = "alias quality is load-bearing; lazy aliases sink recall"
+mitigation = "min-2 aliases enforced by the tool schema; skill teaches future-question vocabulary; doctor flags thin aliases; snippet 'why' output makes weak aliases visible in use"
+
+[[risk]]
+id = "R-4"
+name = "hook fatigue (what killed the predecessor's automation)"
+mitigation = "thin hooks per 07-hooks-automation.toml; hooks ship as versioned plugin files; system degrades to manual use instead of breaking"
+
+[[risk]]
+id = "R-5"
+name = "concurrent sessions racing on one note"
+mitigation = "atomic rename = last-writer-wins per note; acceptable for v1; git surfaces any lost update in history"
+
+# --- Open questions ---
+
+[[open_question]]
+id = "OQ-1"
+q = "Does fff's internal frecency persist across restarts when embedded as a library, and can we feed our access events into it?"
+status = "RESOLVED 2026-08-09"
+answer = "Yes: FrecencyTracker and QueryTracker are LMDB-backed databases opened at paths we choose (place under .index/); they persist across restarts. Init them before FilePicker::new_with_shared_state. Our access log remains the lifecycle/decay authority per 05-lifecycle.toml."
+
+[[open_question]]
+id = "OQ-2"
+q = "How does fff scoring behave on frontmatter-heavy prose? Do alias lines match well in plain grep, and does fuzzy mode over-match on YAML syntax?"
+resolve_by = "phase 1 dogfooding with the 20-note corpus"
+
+[[open_question]]
+id = "OQ-3"
+q = "rmcp SDK maturity: does it cleanly support our stdio + five-tool shape?"
+resolve_by = "phase 1, day one spike; fallback is a minimal hand-rolled JSON-RPC loop (the predecessor's worked; it was just misplaced effort)"
+
+[[open_question]]
+id = "OQ-4"
+q = "Migration: seed the new store from the user's existing global markdown memory (~/.claude/.../memory/)? Their format is nearly identical (frontmatter + body + [[links]])."
+resolve_by = "phase 2; likely a one-shot import subcommand"
+
+[[open_question]]
+id = "OQ-5"
+q = "What happens to this repo? Proposal: new Rust workspace lives in rust/, Go tree and committed binaries removed once phase 1 dogfooding sticks."
+resolve_by = "user decision at phase 1 exit"

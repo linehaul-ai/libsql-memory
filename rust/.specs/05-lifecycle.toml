@@ -1,0 +1,46 @@
+# Spec 05 — Memory Lifecycle
+# Frecency is the product feature: reinforcement, decay, and dedup all derive from usage data.
+# Memory systems die of hoarding, not forgetting.
+
+[spec]
+id = "lifecycle"
+version = "0.1.0"
+status = "draft"
+
+[access_log]
+purpose = "our own durable record of retrieval events; feeds frecency ranking and decay decisions"
+format = "append-only JSONL at .index/access.jsonl: { ts, handle, via: search_hit|read }"
+ownership = """
+We own this regardless of fff's internal frecency persistence (open question
+OQ-1 in 08-roadmap.toml). If fff's frecency store persists across restarts in
+embedded use, it supplements ranking; if not, nothing breaks — the access log
+is the authority for lifecycle decisions either way.
+"""
+compaction = "doctor rolls entries older than 90 days into per-note counters"
+
+[reinforcement]
+rule = "memory_read records an access event; search hits record a lighter-weight event"
+effect = "frequently retrieved notes gain a ranking multiplier — emergent spaced repetition"
+non_effect = "reads never touch the note file itself (updated stays a content timestamp; mtime stays meaningful for the watcher)"
+
+[decay]
+philosophy = "decay is advisory, then reversible, and only ever destructive by explicit human choice"
+signals = ["never accessed within 30 days of creation", "no access in 90 days", "past expires date", "type = session-summary older than 30 days"]
+action = "doctor lists candidates; --apply moves them to .archive/ (excluded from default search, recoverable by moving back)"
+never = "doctor never hard-deletes; only memory_forget --hard does, one note at a time"
+
+[doctor]
+command = "fff-memory doctor [--apply]"
+checks = [
+  "expired notes (past expires) -> archive candidates",
+  "decayed notes per [decay.signals] -> archive candidates",
+  "notes with fewer than 2 aliases -> quality warning (aliases are load-bearing; see 01-note-format.toml)",
+  "unresolved [[links]] -> listed as 'memories worth writing' (informational, not an error)",
+  "orphaned index entries / cold index -> suggests reindex",
+  "access-log compaction",
+]
+output = "human-readable report; --apply performs archive moves and compaction, prints a suggested git commit message"
+
+[reindex]
+command = "fff-memory reindex"
+behavior = "drop .index/ fff cache and rescan from disk; always safe because files are the source of truth"

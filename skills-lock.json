@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "lanshu-animated-architecture-diagram": {
+      "source": "cclank/lanshu-animated-architecture-diagram",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "cc6774034e8a572bd469db1ac2e05fe40ea7f6bddbe7d8e2a214047b8a87319e"
+    }
+  }
+}
