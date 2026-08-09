@@ -49,6 +49,7 @@ pub struct MemoryStoreArgs {
     pub body: String,
     /// Synonyms / alternate phrasings a future query might use (min 2).
     /// Write aliases in the vocabulary of future questions, not restatements of the title.
+    #[schemars(length(min = 2))]
     pub aliases: Vec<String>,
     /// Namespace directory (default `default`).
     #[serde(default = "default_namespace")]
@@ -88,6 +89,7 @@ pub struct MemorySearchArgs {
     pub limit: u32,
     /// Byte budget for full results (default 4096, max 16384).
     #[serde(default = "default_budget")]
+    #[schemars(range(max = 16384))]
     pub budget_bytes: u32,
     /// Include archived notes (default false).
     #[serde(default)]

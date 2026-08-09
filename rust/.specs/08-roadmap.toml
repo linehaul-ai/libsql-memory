@@ -84,7 +84,8 @@ resolve_by = "phase 1 dogfooding with the 20-note corpus"
 [[open_question]]
 id = "OQ-3"
 q = "rmcp SDK maturity: does it cleanly support our stdio + five-tool shape?"
-resolve_by = "phase 1, day one spike; fallback is a minimal hand-rolled JSON-RPC loop (the predecessor's worked; it was just misplaced effort)"
+status = "RESOLVED 2026-08-09"
+answer = "Yes. The official rmcp 3.1.2 service runs MemoryServer's exact five-tool contract over its async read/write transport. A real tokio duplex JSON-RPC test proves initialization, notification handling, discovery schemas, all tool calls, and actionable errors; checked-in initialize and tools/list goldens preserve the wire contract."
 
 [[open_question]]
 id = "OQ-4"

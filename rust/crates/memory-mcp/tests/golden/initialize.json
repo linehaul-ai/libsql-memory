@@ -1,0 +1,11 @@
+{
+  "capabilities": {
+    "tools": {}
+  },
+  "instructions": "Persistent agent memory: store notes with rich aliases, search lexically, read by handle. Prefer memory_search with 2–3 reformulations before concluding nothing is stored.",
+  "protocolVersion": "2025-11-25",
+  "serverInfo": {
+    "name": "fff-memory",
+    "version": "0.1.0"
+  }
+}

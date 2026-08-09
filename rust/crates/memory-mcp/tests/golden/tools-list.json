@@ -1,0 +1,163 @@
+{
+  "tools": [
+    {
+      "description": "Archive a note to .archive/ (default) or hard-delete when hard=true. Archive is reversible; hard delete is not.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "handle": {
+            "description": "Handle `namespace/slug`.",
+            "type": "string"
+          },
+          "hard": {
+            "default": false,
+            "description": "When true, hard-delete; default archives to `.archive/`.",
+            "type": "boolean"
+          }
+        },
+        "required": ["handle"],
+        "type": "object"
+      },
+      "name": "memory_forget",
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      }
+    },
+    {
+      "description": "Fetch one full note by handle (namespace/slug). Records an access event for frecency ranking. Returns frontmatter, body, and one-hop linked note titles.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "handle": {
+            "description": "Handle `namespace/slug` (or `slug` at root).",
+            "type": "string"
+          }
+        },
+        "required": ["handle"],
+        "type": "object"
+      },
+      "name": "memory_read",
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      }
+    },
+    {
+      "description": "Layered lexical search over memory notes. Returns ranked snippets with handles and a 'why' per result. Prefer 2–3 query reformulations before concluding a memory does not exist. Empty results explain stages tried.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "budget_bytes": {
+            "default": 4096,
+            "description": "Byte budget for full results (default 4096, max 16384).",
+            "format": "uint32",
+            "maximum": 16384,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "include_archived": {
+            "default": false,
+            "description": "Include archived notes (default false).",
+            "type": "boolean"
+          },
+          "limit": {
+            "default": 8,
+            "description": "Max full results (default 8).",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "namespace": {
+            "default": null,
+            "description": "Namespace subtree; omit for whole root.",
+            "type": ["string", "null"]
+          },
+          "query": {
+            "description": "Lexical query. Prefer 2–3 reformulations before concluding no memory exists.",
+            "type": "string"
+          }
+        },
+        "required": ["query"],
+        "type": "object"
+      },
+      "name": "memory_search",
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      }
+    },
+    {
+      "description": "Store health: counts by namespace and type, disk size, index status, access-log summary, notes nearing expiry.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "namespace": {
+            "default": null,
+            "description": "Optional namespace filter.",
+            "type": ["string", "null"]
+          }
+        },
+        "type": "object"
+      },
+      "name": "memory_stats",
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      }
+    },
+    {
+      "description": "Store or update a memory note. Aliases are load-bearing: write them in the vocabulary of future questions (min 2). Never fails because search is unavailable.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "aliases": {
+            "description": "Synonyms / alternate phrasings a future query might use (min 2).\nWrite aliases in the vocabulary of future questions, not restatements of the title.",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 2,
+            "type": "array"
+          },
+          "body": {
+            "description": "Markdown body (required).",
+            "type": "string"
+          },
+          "expires": {
+            "default": null,
+            "description": "Optional expiry `YYYY-MM-DD`.",
+            "type": ["string", "null"]
+          },
+          "mode": {
+            "default": "append",
+            "description": "How to merge if dedup finds an existing note: `append` (default) or `replace`.",
+            "type": "string"
+          },
+          "namespace": {
+            "default": "default",
+            "description": "Namespace directory (default `default`).",
+            "type": "string"
+          },
+          "tags": {
+            "default": [],
+            "description": "Optional tags.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "title": {
+            "description": "Human-readable title (required).",
+            "type": "string"
+          },
+          "type": {
+            "description": "Note kind: fact | decision | preference | lesson | reference | session-summary.",
+            "type": "string"
+          }
+        },
+        "required": ["title", "body", "aliases", "type"],
+        "type": "object"
+      },
+      "name": "memory_store",
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      }
+    }
+  ]
+}

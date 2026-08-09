@@ -12,6 +12,7 @@ protocol = "MCP JSON-RPC 2.0"
 sdk = "official Rust MCP SDK (rmcp) — do not hand-roll the protocol layer like the predecessor did"
 logging = "stderr only; stdout is reserved for the protocol"
 name = "fff-memory"
+wire_evidence = "MemoryServer::serve over tokio::io::duplex proves initialize, notifications/initialized, tools/list, all five tool calls, and structured errors; initialize and tools/list are checked against complete JSON goldens"
 
 # --- Tools ---
 
@@ -37,8 +38,8 @@ summary = "Layered lexical search (see 03-retrieval.toml). Returns ranked snippe
 args = [
   "query: string (required)",
   "namespace: string (optional; absent = all)",
-  "limit: int (default 8)",
-  "budget_bytes: int (default 4096, max 16384)",
+  "limit: uint32 (schema minimum 0, default 8; runtime 0 selects the default)",
+  "budget_bytes: uint32 (schema minimum 0, default 4096, max 16384; runtime clamps values above the max)",
   "include_archived: bool (default false)",
 ]
 returns = "{ results: [{ handle, title, snippet, why, score }], more: [handle+title], stages_run, scope }"
@@ -71,3 +72,8 @@ note = "Same binary, subcommands mirror the tools 1:1 plus lifecycle commands: f
 [errors]
 style = "structured, actionable, never silent; every error names the failing input and a fix"
 example = "namespace 'a/../b' rejected: path traversal; use a relative subtree like 'projects/tms'"
+
+[schema_contract]
+aliases = "required array with minItems 2; runtime validation enforces the same minimum"
+limit = "minimum 0 and default 8; no application-specific maximum"
+budget_bytes = "minimum 0, default 4096, maximum 16384; explicit zero is valid"
