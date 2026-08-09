@@ -274,6 +274,34 @@ fn grep_reports_title_tag_and_body_fields_truthfully() {
 }
 
 #[test]
+fn grep_classifies_bom_prefixed_frontmatter_fields() {
+    let dir = tempdir().unwrap();
+    write_note(
+        dir.path(),
+        "proj/bom.md",
+        "\u{feff}---\ntitle: BOM Title Needle\naliases:\n- first alias\n- bom alias needle\ntags:\n- bom-tag-needle\ntype: fact\ncreated: 2026-01-01\nupdated: 2026-01-01\n---\nbody\n",
+    );
+    let r = open_ready(dir.path());
+
+    let title = r
+        .grep("BOM Title Needle", GrepMode::Plain, None, false)
+        .unwrap();
+    let alias = r
+        .grep("bom alias needle", GrepMode::Plain, None, false)
+        .unwrap();
+    let tag = r
+        .grep("bom-tag-needle", GrepMode::Plain, None, false)
+        .unwrap();
+
+    assert_eq!(title[0].matched, ContentMatch::Title);
+    assert_eq!(
+        alias[0].matched,
+        ContentMatch::Alias("bom alias needle".into())
+    );
+    assert_eq!(tag[0].matched, ContentMatch::Tags);
+}
+
+#[test]
 fn alias_provenance_survives_fuzzy_and_constrained_queries() {
     let dir = tempdir().unwrap();
     write_note(

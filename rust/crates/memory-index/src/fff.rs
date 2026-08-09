@@ -447,6 +447,7 @@ fn classify_content_match(
 }
 
 fn frontmatter_field(text: &str, target_line: u64) -> Option<&str> {
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let mut in_frontmatter = false;
     let mut field = None;
     for (index, line) in text.lines().enumerate() {

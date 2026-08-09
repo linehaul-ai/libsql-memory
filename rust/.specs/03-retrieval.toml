@@ -11,7 +11,7 @@ stages = [
   "1. Parse query with fff-query-parser.",
   "2. Run concurrently: (a) fffind over paths/slugs (titles are slugs, so this is title search); (b) plain-mode grep over note content — frontmatter included, so aliases and tags match here. A backend failure propagates with its stage, query, and scope.",
   "3. Escalate: if merged results < min_results (default 3), rerun grep in fuzzy mode.",
-  "4. Merge and dedupe by (namespace, slug); a note matching in both stages takes the max component score plus a both-stages bonus.",
+  "4. Merge and dedupe by (namespace, slug); a note matching in both stages takes the max base component score plus one both-stages bonus, and snippet/why provenance comes from the highest-scoring content component (longer snippet breaks score ties).",
   "5. Rank: final = match_score * frecency_multiplier (see [ranking]).",
   "6. Shape output under the token budget (see [output]).",
 ]
@@ -43,7 +43,7 @@ per_result = [
   "score",
 ]
 why_provenance = "content matches retain their 1-based matched line and structurally classified frontmatter/body field through merge and rank; alias why text names the alias that actually matched, including later block-list aliases"
-overflow = "results beyond the limit or snippet budget are returned as bare slug+title lines under a 'more' key; more entries are outside budget_bytes"
+overflow = "limit caps admitted full results, so an oversized candidate does not consume a limit slot; results not admitted by the limit or snippet budget are returned as bare slug+title lines under a 'more' key; more entries are outside budget_bytes"
 reinforcement = "append search_hit access events and reinforce backend frecency only for handles present in shaped results, never for more or other overflow"
 no_silent_empty = """
 An empty result set must say what was tried: stages run, scope searched, and a

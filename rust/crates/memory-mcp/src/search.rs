@@ -155,6 +155,16 @@ pub fn merge_hits(
     }
 
     let mut out: Vec<MergedHit> = map.into_values().collect();
+    for hit in &mut out {
+        let has_file = hit.stages.contains(&MatchStage::FindFiles);
+        let has_grep = hit
+            .stages
+            .iter()
+            .any(|stage| matches!(stage, MatchStage::GrepPlain | MatchStage::GrepFuzzy));
+        if has_file && has_grep {
+            hit.match_score += BOTH_STAGES_BONUS;
+        }
+    }
     out.sort_by(|a, b| {
         b.match_score
             .partial_cmp(&a.match_score)
@@ -192,29 +202,16 @@ fn upsert(
                 };
                 return;
             }
-            let had_file = hit.stages.contains(&MatchStage::FindFiles);
-            let had_grep = hit
-                .stages
-                .iter()
-                .any(|s| matches!(s, MatchStage::GrepPlain | MatchStage::GrepFuzzy));
-            let is_file = stage == MatchStage::FindFiles;
-            let is_grep = matches!(stage, MatchStage::GrepPlain | MatchStage::GrepFuzzy);
-
             if !hit.stages.contains(&stage) {
                 hit.stages.push(stage);
             }
             hit.match_score = hit.match_score.max(score);
-            if (had_file && is_grep) || (had_grep && is_file) {
-                // Apply bonus once when both stage families are present.
-                if !(had_file && had_grep) {
-                    hit.match_score += BOTH_STAGES_BONUS;
-                }
-            }
             if let Some(content) = content {
-                let replace = hit
-                    .content
-                    .as_ref()
-                    .is_none_or(|current| content.snippet.len() > current.snippet.len());
+                let replace = hit.content.as_ref().is_none_or(|current| {
+                    content.score > current.score
+                        || (content.score == current.score
+                            && content.snippet.len() > current.snippet.len())
+                });
                 if replace {
                     hit.content = Some(content);
                 }
@@ -417,8 +414,8 @@ pub fn apply_budget(
     let mut more = Vec::new();
     let mut used = 0usize;
 
-    for (i, hit) in ranked.into_iter().enumerate() {
-        if i >= limit {
+    for hit in ranked {
+        if results.len() >= limit {
             more.push(MoreHit {
                 handle: hit.handle,
                 title: hit.title,
@@ -489,6 +486,40 @@ mod tests {
         let file = vec![(PathBuf::from("a.md"), 1.0), (PathBuf::from("b.md"), 0.5)];
         let merged = merge_hits(&file, &[], &[]);
         assert_eq!(merged.len(), 2);
+    }
+
+    #[test]
+    fn merge_keeps_best_content_provenance_aligned_with_score() {
+        let path = PathBuf::from("proj/a.md");
+        let file = vec![(path.clone(), 0.1)];
+        let plain = vec![ContentHit {
+            path: path.clone(),
+            snippet: "lower scoring but much longer content".into(),
+            line: 9,
+            score: 0.2,
+            matched: ContentMatch::Body,
+        }];
+        let fuzzy = vec![ContentHit {
+            path,
+            snippet: "best".into(),
+            line: 4,
+            score: 0.4,
+            matched: ContentMatch::Alias("best alias".into()),
+        }];
+
+        let merged = merge_hits(&file, &plain, &fuzzy);
+        let hit = &merged[0];
+
+        assert_eq!(
+            hit.content.as_ref().unwrap().matched,
+            ContentMatch::Alias("best alias".into())
+        );
+        assert_eq!(hit.content.as_ref().unwrap().snippet, "best");
+        assert!((hit.match_score - (0.4 + BOTH_STAGES_BONUS)).abs() < 1e-5);
+        assert_eq!(hit.stages.len(), 3);
+        assert!(hit.stages.contains(&MatchStage::FindFiles));
+        assert!(hit.stages.contains(&MatchStage::GrepPlain));
+        assert!(hit.stages.contains(&MatchStage::GrepFuzzy));
     }
 
     #[test]
@@ -662,7 +693,7 @@ mod tests {
         };
         let budget = serde_json::to_vec(&candidate).unwrap().len();
 
-        let out = apply_budget(vec![large, small], 8, budget, &[MatchStage::GrepPlain], "");
+        let out = apply_budget(vec![large, small], 1, budget, &[MatchStage::GrepPlain], "");
 
         assert_eq!(out.results[0].handle, "small");
         assert_eq!(out.more[0].handle, "large");
