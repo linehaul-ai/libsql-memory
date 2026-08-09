@@ -11,10 +11,7 @@
   "plugins": [
     {
       "name": "fff-memory",
-      "source": {
-        "source": "url",
-        "url": "https://github.com/linehaul-ai/libsql-memory.git"
-      },
+      "source": "./",
       "description": "Persistent lexical memory for Claude Code",
       "version": "0.1.0"
     }

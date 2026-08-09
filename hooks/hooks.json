@@ -26,7 +26,7 @@
             "server": "plugin:fff-memory:fff-memory",
             "tool": "memory_search",
             "input": {
-              "query": "${prompt}",
+              "query": "__fff_memory_user_prompt__:${prompt}",
               "limit": 8,
               "budget_bytes": 2048
             },
@@ -40,7 +40,7 @@
         "hooks": [
           {
             "type": "agent",
-            "prompt": "Review $ARGUMENTS. If the session produced substantive decisions or discoveries not already stored, call memory_store at most once with type session-summary and 2–6 future-question aliases; otherwise do nothing.\nNever store secrets or routine activity. Return {\"ok\":true} after storing or skipping.",
+            "prompt": "Review $ARGUMENTS. Only when mcp__plugin_fff-memory_fff-memory__memory_store is already allowed, call memory_store at most once for substantive decisions or discoveries not already stored, with type session-summary and 2–6 future-question aliases; otherwise skip and fail open.\nNever store secrets or routine activity. Return {\"ok\":true} after storing or skipping.",
             "timeout": 60
           }
         ]

@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use serde_json::{json, Value};
 
@@ -21,7 +22,7 @@ fn json_file(rel: &str) -> Value {
 }
 
 fn memory_tool_names(text: &str) -> BTreeSet<&str> {
-    text.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+    text.split(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '_' | '-')))
         .filter(|word| {
             word.strip_prefix("memory_")
                 .is_some_and(|name| name.starts_with(char::is_alphanumeric))
@@ -90,10 +91,7 @@ fn package_is_portable_rust_fff_memory() {
     let entries = marketplace["plugins"].as_array().unwrap();
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0]["name"], "fff-memory");
-    assert_eq!(
-        entries[0]["source"]["url"],
-        "https://github.com/linehaul-ai/libsql-memory.git"
-    );
+    assert_eq!(entries[0]["source"], "./");
     assert!(entries[0]["description"]
         .as_str()
         .unwrap()
@@ -136,7 +134,10 @@ fn hooks_are_exactly_three_thin_handlers() {
         assert_eq!(handler["timeout"], 5);
     }
     let prompt = &hooks["UserPromptSubmit"][0]["hooks"][0];
-    assert_eq!(prompt["input"]["query"], "${prompt}");
+    assert_eq!(
+        prompt["input"]["query"],
+        "__fff_memory_user_prompt__:${prompt}"
+    );
     assert_eq!(prompt["input"]["budget_bytes"], 2048);
 
     let stop = &hooks["Stop"][0]["hooks"][0];
@@ -144,10 +145,12 @@ fn hooks_are_exactly_three_thin_handlers() {
     let stop_prompt = stop["prompt"].as_str().unwrap();
     for required in [
         "memory_store",
+        "mcp__plugin_fff-memory_fff-memory__memory_store",
+        "already allowed",
         "at most once",
         "session-summary",
         "2–6",
-        "do nothing",
+        "skip",
     ] {
         assert!(
             stop_prompt.contains(required),
@@ -184,6 +187,9 @@ fn skill_and_commands_expose_only_the_five_tool_contract() {
         "memory_stats",
     ]);
     assert_eq!(memory_tool_names(&skill), valid);
+    assert!(skill.contains("mcp__plugin_fff-memory_fff-memory__memory_store"));
+    assert!(skill_lower.contains("pre-approve"));
+    assert!(skill_lower.contains("stop"));
 
     let command_names: BTreeSet<_> = fs::read_dir(repo_root().join("commands"))
         .unwrap()
@@ -194,9 +200,15 @@ fn skill_and_commands_expose_only_the_five_tool_contract() {
         BTreeSet::from(["memory-doctor.md".into(), "memory-status.md".into()])
     );
     let status = read("commands/memory-status.md");
-    assert!(status.contains("memory_stats"));
+    assert!(status.contains("mcp__plugin_fff-memory_fff-memory__memory_stats"));
+    assert!(!status.contains("mcp__fff-memory__memory_stats"));
     assert!(!status.contains("memory_search"));
     let doctor = read("commands/memory-doctor.md");
+    assert!(doctor.contains("disable-model-invocation: true"));
+    assert!(doctor.contains(
+        "Bash(cargo run --quiet --manifest-path \"${CLAUDE_PLUGIN_ROOT}/rust/Cargo.toml\" --bin fff-memory -- doctor --project \"${CLAUDE_PROJECT_DIR}\")"
+    ));
+    assert!(!doctor.contains("manifest-path *)"));
     assert!(doctor.contains("cargo run"));
     assert!(doctor.contains("fff-memory"));
     assert!(doctor.contains("doctor"));
@@ -228,4 +240,24 @@ fn ci_runs_all_four_workspace_gates_from_rust() {
     ] {
         assert!(ci.contains(gate), "CI lacks {gate:?}");
     }
+}
+
+#[test]
+fn local_claude_validates_the_plugin_when_available() {
+    let available = Command::new("claude").arg("--version").output();
+    if !available.is_ok_and(|output| output.status.success()) {
+        return;
+    }
+
+    let output = Command::new("claude")
+        .args(["plugin", "validate", "--strict", "."])
+        .current_dir(repo_root())
+        .output()
+        .expect("run local Claude plugin validator");
+    assert!(
+        output.status.success(),
+        "validator failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }

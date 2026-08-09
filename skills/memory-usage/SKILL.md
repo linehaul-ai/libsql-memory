@@ -5,6 +5,8 @@ description: Store and retrieve durable project knowledge with fff-memory.
 
 # Memory usage
 
+For automatic Stop storage, pre-approve `mcp__plugin_fff-memory_fff-memory__memory_store` in Claude permissions. Without that scoped permission, the Stop hook skips storage and fails open.
+
 Search with `memory_search` before relying on prior decisions, preferences, conventions, or hard-won fixes. Try 2–3 concise reformulations before concluding no memory exists, then use `memory_read` for the full note behind a result handle.
 
 Store only durable knowledge with `memory_store`: one fact per note, never secrets, routine activity, or facts already obvious from maintained documentation. Supply `title`, `body`, `type`, and 2–6 `aliases`; optional `tags` and `namespace` improve organization. Aliases must use future-question vocabulary, not restate the title.

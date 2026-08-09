@@ -265,7 +265,7 @@ async fn official_rmcp_wire_contract_matches_five_tool_goldens() {
             "tools/call",
             json!({
                 "name": "memory_search",
-                "arguments": { "query": "deployment policy decision", "namespace": "ops" }
+                "arguments": { "query": "deploy", "namespace": "ops" }
             }),
         )
         .await;
