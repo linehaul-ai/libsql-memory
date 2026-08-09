@@ -25,7 +25,7 @@ event = "UserPromptSubmit"
 action = "memory_search with 2-3 key terms from the prompt; inject only results above a floor score, capped at ~500 tokens"
 skip = "prompt under 20 chars, slash commands, greetings"
 handler = "one mcp_tool memory_search call with a private automation marker plus ${prompt}, a 2048-byte budget, and fail-open timeout"
-skip_implementation = "MemoryService::search strips the private marker and applies prompt skip classification only to marked hook queries before touching the retriever; manual MCP/API/CLI searches, including short and slash-prefixed queries, search normally. Hook `if` conditions apply only to tool permission rules."
+skip_implementation = "MemoryService::search strips the private marker, applies prompt skip classification only to marked hook queries, and reduces substantive prompts to the first two bounded non-stopword key terms before touching the retriever; manual MCP/API/CLI searches, including short and slash-prefixed queries, search normally. Hook `if` conditions apply only to tool permission rules."
 
 [[hook]]
 event = "Stop"

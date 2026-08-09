@@ -15,7 +15,7 @@ frontmatter = "YAML, delimited by --- lines, at top of file (Obsidian-compatible
 
 [identity]
 id = "slug (filename stem); unique within namespace"
-namespace = "the directory path relative to the memory root; nested namespaces are nested directories"
+namespace = "the directory path relative to the memory root; nested namespaces are nested directories; leading or trailing whitespace is rejected so stored handles remain addressable"
 collision_rule = "storing to an existing (namespace, slug) updates that note (see 02-write-path.toml dedup rules)"
 
 # --- Frontmatter fields ---

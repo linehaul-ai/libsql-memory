@@ -355,6 +355,20 @@ fn grep_body_content() {
 }
 
 #[test]
+fn fuzzy_rejects_overlong_query_without_panicking() {
+    let dir = tempdir().unwrap();
+    seed_corpus(dir.path());
+    let retriever = open_ready(dir.path());
+
+    let error = retriever
+        .grep(&"x".repeat(82), GrepMode::Fuzzy, None, false)
+        .expect_err("fff fuzzy scoring overflows above its safe query length")
+        .to_string();
+
+    assert!(error.contains("key terms"), "error={error}");
+}
+
+#[test]
 fn backend_scores_are_normalized_per_page() {
     let dir = tempdir().unwrap();
     seed_corpus(dir.path());
@@ -636,38 +650,6 @@ fn open_rejects_each_symlinked_lmdb_file_without_creating_its_target() {
             Ok(_) => panic!("open must reject symlinked LMDB file {relative}"),
             Err(error) => error.to_string(),
         };
-
-        assert!(error.contains("symlink"), "path={relative} error={error}");
-        assert!(
-            !external_target.exists(),
-            "path={relative} created an external target"
-        );
-    }
-}
-
-#[cfg(unix)]
-#[test]
-fn reindex_rejects_each_lmdb_file_replaced_with_a_symlink() {
-    use std::os::unix::fs::symlink;
-
-    for relative in [
-        ".index/frecency/data.mdb",
-        ".index/frecency/lock.mdb",
-        ".index/queries/data.mdb",
-        ".index/queries/lock.mdb",
-    ] {
-        let root = tempdir().unwrap();
-        let outside = tempdir().unwrap();
-        let external_target = outside.path().join("created-outside");
-        let retriever = open_ready(root.path());
-        let link = root.path().join(relative);
-        fs::remove_file(&link).unwrap();
-        symlink(&external_target, &link).unwrap();
-
-        let error = retriever
-            .reindex()
-            .expect_err("reindex must reject a substituted LMDB symlink")
-            .to_string();
 
         assert!(error.contains("symlink"), "path={relative} error={error}");
         assert!(

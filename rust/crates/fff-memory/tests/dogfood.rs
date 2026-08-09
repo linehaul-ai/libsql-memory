@@ -312,4 +312,13 @@ fn twenty_note_prose_corpus_proves_end_to_end_retrieval_contract() {
         handles["Production Deployment Pipeline"]
     );
     assert!(read.body.contains("blue-green rollout"));
+
+    let automatic = search(
+        &service,
+        "__fff_memory_user_prompt__:Can you remind me what our release process is before I change the production deployment workflow?",
+    );
+    assert_eq!(
+        automatic.results[0].handle,
+        handles["Production Deployment Pipeline"]
+    );
 }

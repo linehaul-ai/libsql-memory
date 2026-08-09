@@ -77,12 +77,21 @@ fn read_selected_config(path: &Path) -> Result<PathBuf, ResolveError> {
 
 fn parse_config(path: &Path, contents: &str) -> Result<PathBuf, ResolveError> {
     serde_json::from_str::<Config>(contents)
-        .map(|config| config.root)
         .map_err(|error| {
             ResolveError(format!(
                 "invalid config {}: {error}; {CONFIG_FIX}",
                 path.display()
             ))
+        })
+        .and_then(|config| {
+            if config.root.as_os_str().is_empty() {
+                Err(ResolveError(format!(
+                    "invalid config {}: root must not be empty; {CONFIG_FIX}",
+                    path.display()
+                )))
+            } else {
+                Ok(config.root)
+            }
         })
 }
 

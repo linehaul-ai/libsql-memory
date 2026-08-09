@@ -2,9 +2,9 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project Status: Rust Rewrite In Progress
+## Project Status: Rust Implementation Complete; Dogfooding In Progress
 
-This repo is being rebuilt as **fff-memory** (working name): a persistent agent memory for
+This repo has been rebuilt as **fff-memory** (working name): a persistent agent memory for
 Claude Code, written in Rust around the [fff](https://github.com/dmtrKovalenko/fff) search
 engine. The previous Go + LibSQL + embeddings implementation is abandoned.
 
@@ -72,7 +72,7 @@ it carries the full API reference. Key facts:
   survives restarts. Our append-only access log remains the authority for lifecycle/decay
   decisions.
 - **Init order**: open and `.init()` `SharedFrecency` (and `SharedQueryTracker`) *before*
-  `FilePicker::new_with_shared_state`; then `wait_for_scan` before the first search.
+  `FilePicker::new_with_shared_state`; then `wait_for_indexing_complete` before the first search.
 - **Mode**: use `FFFMode::Ai`.
 - **Lock discipline**: hold picker read guards only for the duration of a search; background
   rescan threads need the write lock.

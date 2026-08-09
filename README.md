@@ -3,9 +3,10 @@
 Persistent semantic memory for Claude Code — markdown files, lexical search, zero
 infrastructure. Built in Rust on the [fff](https://github.com/dmtrKovalenko/fff) search engine.
 
-> **Status: rewrite in progress.** This repo previously held a Go + LibSQL + embeddings
-> implementation. It is being rebuilt from specs; see [`rust/.specs/`](rust/.specs/) for the
-> authoritative design and [Why the rewrite](#why-the-rewrite) for the story.
+> **Status: Rust implementation complete; real-use acceptance in progress.** This repo
+> previously held a Go + LibSQL + embeddings implementation. See
+> [`rust/.specs/`](rust/.specs/) for the authoritative design and
+> [Why the rewrite](#why-the-rewrite) for the story.
 
 ## The idea: write smart, search cheap
 
@@ -54,7 +55,7 @@ One Rust binary, both an MCP stdio server and a CLI, embedding the `fff-search` 
 Thin Claude Code hooks (session start, prompt submit, session end) plus a `memory-usage` skill
 that teaches the alias discipline good recall depends on.
 
-## Planned layout
+## Workspace layout
 
 ```
 rust/
@@ -75,7 +76,7 @@ plain file operations, search is a disposable cache over them, and the semantic 
 write time where an LLM is always present. The full post-mortem is encoded as `[lessons]` in
 [`rust/.specs/00-overview.toml`](rust/.specs/00-overview.toml).
 
-## Building (once phase 1 lands)
+## Building
 
 ```bash
 cd rust

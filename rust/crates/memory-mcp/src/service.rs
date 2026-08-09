@@ -10,15 +10,16 @@ use crate::search::{
     BUDGET_BYTES_DEFAULT, MIN_RESULTS_FOR_FUZZY, SEARCH_LIMIT_DEFAULT,
 };
 use memory_core::{
-    extract_wikilinks, safe_join, AccessLog, AccessSnapshot, AccessVia, GrepMode, IndexState,
-    MemoryStore, MergeMode, Note, NoteFrontmatter, NoteType, Retriever, StoreAction, StoreInput,
-    StoreOutcome,
+    extract_wikilinks, safe_join, validate_namespace, AccessLog, AccessSnapshot, AccessVia,
+    GrepMode, IndexState, MemoryStore, MergeMode, Note, NoteFrontmatter, NoteType, Retriever,
+    StoreAction, StoreInput, StoreOutcome,
 };
 use memory_core::{Error, Result};
 use serde::{Deserialize, Serialize};
 use time::Date;
 
 const AUTOMATION_QUERY_PREFIX: &str = "__fff_memory_user_prompt__:";
+const AUTOMATIC_STOP_WORDS: &str = "about and are before can could did does explain for from had has have how into just our please remind should that the this was were what when where which who why will with would you";
 
 /// Options for [`MemoryService::search`].
 #[derive(Debug, Clone)]
@@ -220,7 +221,7 @@ impl MemoryService {
     /// Layered search: stages 1–3 via retriever, 4–6 via pipeline.
     pub fn search(&self, opts: SearchOptions) -> Result<SearchResponse> {
         let raw_query = opts.query.trim();
-        let (query, automatic) = raw_query
+        let (prompt, automatic) = raw_query
             .strip_prefix(AUTOMATION_QUERY_PREFIX)
             .map_or((raw_query, false), |query| (query.trim(), true));
         let scope_owned = opts
@@ -230,9 +231,10 @@ impl MemoryService {
             .filter(|s| !s.is_empty())
             .map(|s| s.to_string());
         let scope = scope_owned.as_deref();
+        validate_namespace(scope.unwrap_or(""))?;
         let scope_label = scope.unwrap_or("").to_string();
 
-        if automatic && should_skip_automatic_query(query) {
+        if automatic && should_skip_automatic_query(prompt) {
             return Ok(SearchResponse {
                 results: Vec::new(),
                 more: Vec::new(),
@@ -243,6 +245,8 @@ impl MemoryService {
                 ),
             });
         }
+        let automatic_query = automatic.then(|| automatic_query_terms(prompt));
+        let query = automatic_query.as_deref().unwrap_or(prompt);
         if query.is_empty() {
             return Ok(SearchResponse {
                 results: Vec::new(),
@@ -315,13 +319,15 @@ impl MemoryService {
         // Access history is advisory for ranking; corrupt state gives neutral frecency.
         let access_snapshot = self.access.snapshot().ok();
         let mut meta = HashMap::new();
-        for m in &merged {
+        let mut valid = Vec::with_capacity(merged.len());
+        for m in merged {
             if let Some(nm) = self.load_meta(&m.path, access_snapshot.as_ref()) {
                 meta.insert(m.path.clone(), nm);
+                valid.push(m);
             }
         }
 
-        let ranked = rank_hits(merged, &meta);
+        let ranked = rank_hits(valid, &meta);
 
         let budgeted = apply_budget(ranked, opts.limit, opts.budget_bytes, &stages, &scope_label);
         self.access
@@ -406,6 +412,16 @@ impl MemoryService {
                 handle: MemoryStore::handle(&ns, &slug),
             });
         }
+        let text = fs::read_to_string(&abs).map_err(|error| Error::io(&abs, error))?;
+        Note::parse(&text).map_err(|error| {
+            Error::validation(
+                "handle",
+                format!(
+                    "{} is not a valid memory note: {error}; add valid YAML frontmatter or choose another handle",
+                    abs.display()
+                ),
+            )
+        })?;
 
         if hard {
             fs::remove_file(&abs).map_err(|e| Error::io(&abs, e))?;
@@ -424,6 +440,8 @@ impl MemoryService {
 
     /// Store health snapshot.
     pub fn stats(&self, namespace: Option<&str>) -> Result<StatsSnapshot> {
+        let ns_filter = namespace.map(str::trim).filter(|s| !s.is_empty());
+        validate_namespace(ns_filter.unwrap_or(""))?;
         let access_snapshot = self.access.snapshot()?;
         let mut total = 0u64;
         let mut by_namespace: HashMap<String, u64> = HashMap::new();
@@ -433,8 +451,6 @@ impl MemoryService {
         let mut expiring_soon = 0u64;
 
         let today = time::OffsetDateTime::now_utc().date();
-        let ns_filter = namespace.map(str::trim).filter(|s| !s.is_empty());
-
         for (rel, note, size) in walk_notes(self.store.root())? {
             if is_under_reserved(&rel) {
                 continue;
@@ -532,6 +548,21 @@ fn should_skip_automatic_query(query: &str) -> bool {
             | "how are you?"
             | "hello, how are you doing?"
     )
+}
+
+fn automatic_query_terms(prompt: &str) -> String {
+    prompt
+        .split(|character: char| !character.is_ascii_alphanumeric())
+        .map(str::to_ascii_lowercase)
+        .filter(|term| {
+            (3..=32).contains(&term.len())
+                && !AUTOMATIC_STOP_WORDS
+                    .split_ascii_whitespace()
+                    .any(|word| word == term)
+        })
+        .take(2)
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn index_unavailable_response(scope: &str, state: IndexState) -> SearchResponse {
@@ -701,6 +732,18 @@ mod tests {
         fs::write(path, md).unwrap();
     }
 
+    fn seed_ranked_notes(root: &Path) {
+        for i in 0..3 {
+            seed_note(
+                root,
+                &format!("proj/{i}.md"),
+                &format!("Needle {i}"),
+                &["needle result", "tracking result"],
+                "body",
+            );
+        }
+    }
+
     #[test]
     fn parse_handle_variants() {
         assert_eq!(
@@ -714,6 +757,32 @@ mod tests {
         );
         assert!(parse_handle("").is_err());
         assert!(parse_handle("../x").is_err());
+        assert!(parse_handle(".archive/proj/x").is_err());
+        assert!(parse_handle(".index/x").is_err());
+    }
+
+    #[test]
+    fn search_rejects_traversal_namespace() {
+        let dir = tempdir().unwrap();
+        let error = MemoryService::new(dir.path(), None)
+            .search(SearchOptions {
+                query: "note".into(),
+                namespace: Some("a/../b".into()),
+                ..SearchOptions::default()
+            })
+            .expect_err("search namespace must use the shared validator");
+
+        assert!(matches!(error, Error::InvalidNamespace { .. }));
+    }
+
+    #[test]
+    fn stats_rejects_traversal_namespace() {
+        let dir = tempdir().unwrap();
+        let error = MemoryService::new(dir.path(), None)
+            .stats(Some("a/../b"))
+            .expect_err("stats namespace must use the shared validator");
+
+        assert!(matches!(error, Error::InvalidNamespace { .. }));
     }
 
     #[test]
@@ -1099,7 +1168,7 @@ mod tests {
     }
 
     #[test]
-    fn marked_substantive_query_is_stripped_before_retrieval() {
+    fn marked_substantive_query_is_reduced_to_key_terms() {
         let dir = tempdir().unwrap();
         let calls = Arc::new(AtomicUsize::new(0));
         let queries = Arc::new(Mutex::new(Vec::new()));
@@ -1120,7 +1189,11 @@ mod tests {
             .unwrap();
 
         assert!(calls.load(Ordering::SeqCst) > 0);
-        assert!(queries.lock().unwrap().iter().all(|seen| seen == query));
+        assert!(queries
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|seen| seen == "deployment policy"));
     }
 
     #[test]
@@ -1316,6 +1389,7 @@ mod tests {
     #[test]
     fn search_overlaps_find_and_plain_grep() {
         let dir = tempdir().unwrap();
+        seed_ranked_notes(dir.path());
         let fake = BarrierRetriever {
             barrier: Barrier::new(2),
             active: AtomicUsize::new(0),
@@ -1477,6 +1551,7 @@ mod tests {
     #[test]
     fn search_records_only_results_not_limit_overflow_without_backend_write() {
         let dir = tempdir().unwrap();
+        seed_ranked_notes(dir.path());
         let fake = Arc::new(TrackingRetriever::default());
         let svc = MemoryService::new(dir.path(), Some(fake.clone()));
 
@@ -1501,6 +1576,7 @@ mod tests {
     #[test]
     fn search_does_not_reinforce_budget_overflow() {
         let dir = tempdir().unwrap();
+        seed_ranked_notes(dir.path());
         let fake = Arc::new(TrackingRetriever::default());
         let svc = MemoryService::new(dir.path(), Some(fake.clone()));
 
@@ -1617,6 +1693,47 @@ mod tests {
         let out = svc.forget("gone", true).unwrap();
         assert_eq!(out.action, ForgetAction::Deleted);
         assert!(!dir.path().join("gone.md").exists());
+    }
+
+    #[test]
+    fn forget_refuses_non_note_markdown_for_both_modes() {
+        let dir = tempdir().unwrap();
+        let readme = dir.path().join("README.md");
+        fs::write(&readme, "project documentation\n").unwrap();
+        let svc = MemoryService::new(dir.path(), None);
+
+        for hard in [false, true] {
+            let error = svc
+                .forget("README", hard)
+                .expect_err("forget must only mutate valid memory notes")
+                .to_string();
+            assert!(error.contains("frontmatter"), "error={error}");
+            assert_eq!(
+                fs::read_to_string(&readme).unwrap(),
+                "project documentation\n"
+            );
+            assert!(!dir.path().join(".archive/README.md").exists());
+        }
+    }
+
+    #[test]
+    fn search_excludes_non_note_markdown() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("README.md"), "project documentation\n").unwrap();
+        let fake = Arc::new(FakeRetriever::with_files(vec![FileHit {
+            path: PathBuf::from("README.md"),
+            score: 1.0,
+        }]));
+
+        let response = MemoryService::new(dir.path(), Some(fake))
+            .search(SearchOptions {
+                query: "README".into(),
+                ..SearchOptions::default()
+            })
+            .unwrap();
+
+        assert!(response.results.is_empty(), "{:?}", response.results);
+        assert!(response.more.is_empty(), "{:?}", response.more);
     }
 
     #[test]

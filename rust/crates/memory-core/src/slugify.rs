@@ -75,6 +75,12 @@ pub fn validate_namespace(namespace: &str) -> Result<()> {
     if namespace.is_empty() {
         return Ok(());
     }
+    if namespace.trim() != namespace {
+        return Err(Error::InvalidNamespace {
+            path: namespace.to_string(),
+            reason: "must not have leading or trailing whitespace".into(),
+        });
+    }
 
     if namespace.starts_with('/') || namespace.starts_with('\\') {
         return Err(Error::InvalidNamespace {
@@ -202,5 +208,7 @@ mod tests {
         assert!(validate_namespace("a/").is_err());
         assert!(validate_namespace("./x").is_err());
         assert!(validate_namespace(r"a\b").is_err());
+        assert!(validate_namespace(" proj").is_err());
+        assert!(validate_namespace("proj ").is_err());
     }
 }

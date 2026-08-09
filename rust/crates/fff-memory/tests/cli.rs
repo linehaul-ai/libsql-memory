@@ -439,6 +439,7 @@ fn config_errors_name_the_path_and_the_fix() {
     let cases = [
         ("malformed.json", "{"),
         ("wrong-type.json", r#"{"root": 42}"#),
+        ("empty-root.json", r#"{"root":""}"#),
         ("missing-root.json", r#"{}"#),
         ("unknown.json", r#"{"root":"ok","extra":true}"#),
     ];

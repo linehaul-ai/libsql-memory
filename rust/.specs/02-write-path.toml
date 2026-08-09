@@ -27,7 +27,7 @@ steps = [
 ]
 
 [dedup]
-probe = "fffind + fuzzy grep over title and aliases lines, scoped to the target namespace"
+probe = "fffind + plain grep over title and alias lines, post-filtered to the exact target namespace; merge only after exact title/alias confirmation"
 threshold = "conservative: only treat as duplicate on a strong title/alias match; when in doubt, create a new note (a stray duplicate is cheaper than a wrong merge)"
 best_effort = "If the index is unavailable, skip the probe entirely and create the note. Dedup is an optimization, never a gate."
 update_semantics = """

@@ -24,6 +24,9 @@ const SCAN_TIMEOUT: Duration = Duration::from_secs(30);
 /// Max hits returned per find/grep call (MCP ranks/budgets further).
 const PAGE_LIMIT: usize = 50;
 
+/// fff 0.10.3's fuzzy score arithmetic overflows for longer byte strings.
+const MAX_FUZZY_QUERY_BYTES: usize = 80;
+
 /// fff-backed retriever. Index state lives under `{root}/.index/`.
 ///
 /// Construction is the only fallible setup: after [`FffRetriever::open`] succeeds,
@@ -186,6 +189,14 @@ impl Retriever for FffRetriever {
         scope: Option<&str>,
         include_archived: bool,
     ) -> Result<Vec<ContentHit>> {
+        if mode == GrepMode::Fuzzy && query.len() > MAX_FUZZY_QUERY_BYTES {
+            return Err(Error::validation(
+                "query",
+                format!(
+                    "fuzzy search supports at most {MAX_FUZZY_QUERY_BYTES} UTF-8 bytes with fff 0.10.3; use 2-3 key terms"
+                ),
+            ));
+        }
         let guard = self
             .shared_picker
             .read()

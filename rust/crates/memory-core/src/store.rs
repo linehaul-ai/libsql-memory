@@ -146,6 +146,19 @@ impl MemoryStore {
             });
         }
         let dest = safe_join(&self.root, &PathBuf::from(".archive").join(&rel))?;
+        match fs::symlink_metadata(&dest) {
+            Ok(_) => {
+                return Err(Error::validation(
+                    "archive",
+                    format!(
+                        "destination {} already exists; restore or remove it before archiving this note",
+                        dest.display()
+                    ),
+                ));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(Error::io(&dest, error)),
+        }
         if let Some(parent) = dest.parent() {
             fs::create_dir_all(parent).map_err(|e| Error::io(parent, e))?;
         }
@@ -173,9 +186,8 @@ impl MemoryStore {
             if slug.is_empty() {
                 return Err(Error::validation("handle", "slug segment is empty"));
             }
-            if ns.split('/').any(|s| s.is_empty()) {
-                return Err(Error::validation("handle", "namespace has empty segment"));
-            }
+            validate_namespace(ns)?;
+            reject_reserved_namespace(ns)?;
             Ok((ns.to_string(), slug.to_string()))
         } else {
             Ok((String::new(), handle.to_string()))
@@ -447,8 +459,7 @@ fn probe_dedup(
         if is_reserved_path(&rel) {
             continue;
         }
-        // Scope: if namespace set, path must live under it (segment boundary).
-        if !namespace.is_empty() && !path_in_namespace(&rel, namespace) {
+        if !path_in_exact_namespace(&rel, namespace) {
             continue;
         }
 
@@ -481,13 +492,12 @@ fn probe_dedup(
     None
 }
 
-/// True when `rel` is exactly under `namespace/` (not a prefix sibling like `proj` vs `project`).
-fn path_in_namespace(rel: &Path, namespace: &str) -> bool {
+/// True when the candidate file lives directly in `namespace`, not a descendant.
+fn path_in_exact_namespace(rel: &Path, namespace: &str) -> bool {
     let p = rel.to_string_lossy().replace('\\', "/");
-    p == namespace
-        || p.starts_with(&format!("{namespace}/"))
-        || p.strip_prefix(namespace)
-            .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+    p.rsplit_once('/')
+        .map_or("", |(parent, _)| parent)
+        .eq(namespace)
 }
 
 fn push_unique(out: &mut Vec<PathBuf>, path: PathBuf) {
@@ -697,6 +707,34 @@ mod tests {
     }
 
     #[test]
+    fn archive_refuses_existing_destination_and_preserves_both_notes() {
+        let dir = tempdir().unwrap();
+        let store = MemoryStore::new(dir.path());
+        store
+            .store(base_input("Collision", "active body"), None)
+            .unwrap();
+        let active = dir.path().join("proj/collision.md");
+        let archived = dir.path().join(".archive/proj/collision.md");
+        fs::create_dir_all(archived.parent().unwrap()).unwrap();
+        fs::write(
+            &archived,
+            "---\ntitle: Older Collision\naliases: [older note, archived copy]\ntype: fact\ncreated: 2025-01-01\nupdated: 2025-01-01\n---\narchived body\n",
+        )
+        .unwrap();
+        let active_before = fs::read_to_string(&active).unwrap();
+        let archived_before = fs::read_to_string(&archived).unwrap();
+
+        let error = store
+            .archive_note("proj", "collision")
+            .expect_err("archive collision must not overwrite either note")
+            .to_string();
+
+        assert!(error.contains("already exists"), "error={error}");
+        assert_eq!(fs::read_to_string(active).unwrap(), active_before);
+        assert_eq!(fs::read_to_string(archived).unwrap(), archived_before);
+    }
+
+    #[test]
     fn store_succeeds_when_retriever_errors() {
         let dir = tempdir().unwrap();
         let store = MemoryStore::new(dir.path());
@@ -881,6 +919,61 @@ Nope.
     }
 
     #[test]
+    fn dedup_does_not_cross_exact_namespace_boundaries() {
+        for (namespace, candidate) in [
+            ("proj", "proj/sub/other-note.md"),
+            ("", "proj/other-note.md"),
+        ] {
+            let dir = tempdir().unwrap();
+            let store = MemoryStore::new(dir.path());
+            let candidate_path = dir.path().join(candidate);
+            fs::create_dir_all(candidate_path.parent().unwrap()).unwrap();
+            let original = r#"---
+title: Shipping Cadence
+aliases: [release frequency, CI/CD]
+type: fact
+created: 2026-01-01
+updated: 2026-01-01
+---
+Nested fact.
+"#;
+            fs::write(&candidate_path, original).unwrap();
+            let fake = FakeRetriever {
+                state: IndexState::Ready,
+                contents: Mutex::new(vec![ContentHit {
+                    path: PathBuf::from(candidate),
+                    snippet: "title: Shipping Cadence".into(),
+                    line: 2,
+                    score: 5.0,
+                    matched: ContentMatch::Title,
+                }]),
+                ..Default::default()
+            };
+
+            let out = store
+                .store(
+                    StoreInput {
+                        title: "Shipping Cadence".into(),
+                        body: "Target namespace fact.".into(),
+                        aliases: vec!["release frequency".into(), "deploys".into()],
+                        namespace: namespace.into(),
+                        mode: MergeMode::Replace,
+                        ..base_input("Shipping Cadence", "Target namespace fact.")
+                    },
+                    Some(&fake),
+                )
+                .unwrap();
+
+            assert_eq!(out.action, StoreAction::Created, "candidate={candidate}");
+            assert_eq!(
+                fs::read_to_string(&candidate_path).unwrap(),
+                original,
+                "candidate={candidate}"
+            );
+        }
+    }
+
+    #[test]
     fn rejects_reserved_namespace() {
         let dir = tempdir().unwrap();
         let store = MemoryStore::new(dir.path());
@@ -912,11 +1005,11 @@ Nope.
     }
 
     #[test]
-    fn path_in_namespace_uses_segment_boundary() {
-        assert!(path_in_namespace(Path::new("proj/a.md"), "proj"));
-        assert!(path_in_namespace(Path::new("proj/sub/a.md"), "proj"));
-        assert!(!path_in_namespace(Path::new("project/a.md"), "proj"));
-        assert!(!path_in_namespace(Path::new("pro/a.md"), "proj"));
+    fn path_in_exact_namespace_excludes_descendants_and_siblings() {
+        assert!(path_in_exact_namespace(Path::new("a.md"), ""));
+        assert!(path_in_exact_namespace(Path::new("proj/a.md"), "proj"));
+        assert!(!path_in_exact_namespace(Path::new("proj/sub/a.md"), "proj"));
+        assert!(!path_in_exact_namespace(Path::new("project/a.md"), "proj"));
     }
 
     #[test]
