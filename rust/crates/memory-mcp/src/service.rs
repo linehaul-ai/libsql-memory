@@ -322,16 +322,9 @@ impl MemoryService {
 
         let ranked = rank_hits(merged, &meta);
 
-        let backend_paths: HashMap<String, PathBuf> = ranked
-            .iter()
-            .map(|hit| (hit.handle.clone(), hit.path.clone()))
-            .collect();
         let budgeted = apply_budget(ranked, opts.limit, opts.budget_bytes, &stages, &scope_label);
         for hit in &budgeted.results {
             let _ = self.access.append(&hit.handle, AccessVia::SearchHit);
-            if let Some(path) = backend_paths.get(&hit.handle) {
-                let _ = retriever.track_access(path);
-            }
         }
         Ok(budgeted.into())
     }
@@ -339,9 +332,18 @@ impl MemoryService {
     /// Read full note; records a read access event.
     pub fn read(&self, handle: &str) -> Result<ReadOutcome> {
         let (ns, slug) = parse_handle(handle)?;
+        let relative = MemoryStore::relative_path(&ns, &slug);
+        let backend_path = if self.store.root().join(&relative).is_file() {
+            relative
+        } else {
+            PathBuf::from(".archive").join(relative)
+        };
         let note = self.read_active_or_archived(&ns, &slug)?;
         let handle_norm = MemoryStore::handle(&ns, &slug);
         let _ = self.access.append(&handle_norm, AccessVia::Read);
+        if let Some(retriever) = &self.retriever {
+            let _ = retriever.track_access(&backend_path);
+        }
 
         let mut linked = Vec::new();
         for link in extract_wikilinks(&note.body) {
@@ -1463,7 +1465,7 @@ mod tests {
     }
 
     #[test]
-    fn search_reinforces_only_results_not_limit_overflow() {
+    fn search_records_only_results_not_limit_overflow_without_backend_write() {
         let dir = tempdir().unwrap();
         let fake = Arc::new(TrackingRetriever::default());
         let svc = MemoryService::new(dir.path(), Some(fake.clone()));
@@ -1483,10 +1485,7 @@ mod tests {
         assert_eq!(svc.access.count_recent("proj/0", 30), 1);
         assert_eq!(svc.access.count_recent("proj/1", 30), 0);
         assert_eq!(svc.access.count_recent("proj/2", 30), 0);
-        assert_eq!(
-            fake.tracked.lock().unwrap().as_slice(),
-            &[PathBuf::from("proj/0.md")]
-        );
+        assert!(fake.tracked.lock().unwrap().is_empty());
     }
 
     #[test]
@@ -1507,6 +1506,35 @@ mod tests {
         assert_eq!(response.more.len(), 3);
         assert_eq!(svc.access.len(), 0);
         assert!(fake.tracked.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn read_reinforces_the_selected_backend_path() {
+        let dir = tempdir().unwrap();
+        seed_note(
+            dir.path(),
+            "proj/selected.md",
+            "Selected",
+            &["chosen note", "opened memory"],
+            "body",
+        );
+        let fake = Arc::new(TrackingRetriever::default());
+        let svc = MemoryService::new(dir.path(), Some(fake.clone()));
+
+        svc.read("proj/selected").unwrap();
+
+        assert_eq!(
+            fake.tracked.lock().unwrap().as_slice(),
+            &[PathBuf::from("proj/selected.md")]
+        );
+
+        svc.forget("proj/selected", false).unwrap();
+        fake.tracked.lock().unwrap().clear();
+        svc.read("proj/selected").unwrap();
+        assert_eq!(
+            fake.tracked.lock().unwrap().as_slice(),
+            &[PathBuf::from(".archive/proj/selected.md")]
+        );
     }
 
     #[test]

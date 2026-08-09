@@ -78,14 +78,15 @@ impl FffRetriever {
                 base_path: root.to_string_lossy().into_owned(),
                 mode: FFFMode::Ai,
                 watch: true,
+                enable_content_indexing: true,
                 ..Default::default()
             },
         )
         .map_err(|e| Error::Retriever(format!("start file picker: {e}")))?;
 
-        if !shared_picker.wait_for_scan(SCAN_TIMEOUT) {
+        if !shared_picker.wait_for_indexing_complete(SCAN_TIMEOUT) {
             return Err(Error::Retriever(
-                "initial scan timed out; call reindex() or retry open".into(),
+                "initial scan/content indexing timed out; call reindex() or retry open".into(),
             ));
         }
         if !shared_picker.wait_for_watcher(SCAN_TIMEOUT) {
@@ -326,8 +327,10 @@ impl Retriever for FffRetriever {
         self.shared_picker
             .trigger_full_rescan_async(&self.shared_frecency)
             .map_err(|e| Error::Retriever(format!("reindex: {e}")))?;
-        if !self.shared_picker.wait_for_scan(SCAN_TIMEOUT) {
-            return Err(Error::Retriever("reindex scan timed out".into()));
+        if !self.shared_picker.wait_for_indexing_complete(SCAN_TIMEOUT) {
+            return Err(Error::Retriever(
+                "reindex scan/content indexing timed out".into(),
+            ));
         }
         self.last_scan_ms
             .store(elapsed_ms(scan_started), Ordering::Relaxed);

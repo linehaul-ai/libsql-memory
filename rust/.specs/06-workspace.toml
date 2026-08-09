@@ -47,7 +47,7 @@ name = "memory-index"
 kind = "lib"
 owns = [
   "FffRetriever: the only code that imports fff crates",
-  "watcher lifecycle, warm-up (ai_mode), scan-complete waiting, live count and scan timing",
+  "watcher lifecycle, warm-up (ai_mode), content-bigram indexing with indexing-complete waiting, live count and scan timing",
   "score extraction and normalization into backend-neutral FileHit/ContentHit",
 ]
 deps = ["memory-core", "fff-search (single crate, pinned exact version; grep is a module and fff-query-parser types are re-exported at its root; default 'ripgrep' walker feature)"]

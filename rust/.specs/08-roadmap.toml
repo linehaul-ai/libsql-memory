@@ -20,6 +20,7 @@ scope = [
 exit_criteria = "Real memories stored and retrieved in daily Claude Code use; retrieval *feel* judged on a corpus of 20+ hand-written notes. Feel cannot be computed — this phase exists to measure it."
 implementation_status = "COMPLETE 2026-08-09"
 implementation_evidence = "Property tests cover slug and full-note round trips; a deterministic 20-note prose corpus proves store -> real fff index -> layered search -> read, title/alias/typo recall, namespace scope, archive behavior, type/frecency boosts, and explicit empty guidance; spawned rmcp stdio tests prove the process boundary."
+performance_evidence = "An explicit ignored release-mode gate seeds 2,000 notes and verifies the overview's cold-start and warm-search p50 targets without putting machine-sensitive timing assertions in normal CI."
 acceptance_status = "PENDING REAL USE: the checked-in corpus is reproducible engineering evidence, not 20+ hand-written daily-use memories or a subjective retrieval-feel judgment."
 
 [[phase]]

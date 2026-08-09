@@ -27,7 +27,7 @@ rule = "memory_read records an access event; search hits record a lighter-weight
 effect = "frequently retrieved notes gain a ranking multiplier — emergent spaced repetition"
 weight = "ranking reinforcement is read + 0.25 * search_hit; why text reports Nr+Ms/30d"
 non_effect = "reads never touch the note file itself (updated stays a content timestamp; mtime stays meaningful for the watcher)"
-backend = "only search results that survive limit and budget shaping are recorded and sent to the retriever's best-effort access tracker"
+backend = "search results that survive limit and budget shaping are recorded in the authoritative access log; memory_read sends the selected active-or-archived path once to the retriever's best-effort frecency tracker, avoiding one durable backend transaction per merely exposed result"
 
 [decay]
 philosophy = "decay is advisory, then reversible, and only ever destructive by explicit human choice"

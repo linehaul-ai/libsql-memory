@@ -58,6 +58,7 @@ cold_start_seconds = 1.0          # upper bound at low-thousands of notes
 write_failure_modes = 0           # by construction: no network, no index dependency on write
 subjective = "The user stops manually re-explaining their projects to Claude."
 decay_health = "Percentage of notes never accessed 30 days after creation trends down after doctor sweeps."
+performance_evidence = "The ignored release-mode acceptance test seeds 2,000 notes and asserts cold open < 1 second plus 101-sample warm end-to-end memory_search p50 < 10 ms; run it explicitly because timing assertions do not belong in ordinary CI."
 
 [lessons]
 # Encoded so the failure modes of the predecessor stay designed-out.
