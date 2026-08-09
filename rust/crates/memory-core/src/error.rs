@@ -1,11 +1,13 @@
-//! Structured errors for note parse/validate and identity helpers.
+//! Structured errors for note parse/validate, identity, and the write path.
+
+use std::path::PathBuf;
 
 use thiserror::Error;
 
 /// Fallible operation result for `memory-core`.
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// Errors from note format, slugify, and namespace validation.
+/// Errors from note format, slugify, namespace validation, store, and retrieval.
 #[derive(Debug, Error)]
 pub enum Error {
     /// File text is missing a leading `---` / `---` YAML frontmatter block.
@@ -44,6 +46,27 @@ pub enum Error {
         /// Why it was rejected.
         reason: String,
     },
+
+    /// Filesystem I/O failed while reading or writing a note.
+    #[error("I/O error on {path}: {source}")]
+    Io {
+        /// Path involved in the failure (best-effort).
+        path: PathBuf,
+        /// Underlying OS error.
+        #[source]
+        source: std::io::Error,
+    },
+
+    /// Note file is missing on disk.
+    #[error("note not found: {handle}")]
+    NotFound {
+        /// `namespace/slug` handle that was requested.
+        handle: String,
+    },
+
+    /// Retrieval backend failed (store treats this as best-effort skip for dedup).
+    #[error("retriever error: {0}")]
+    Retriever(String),
 }
 
 impl Error {
@@ -52,6 +75,14 @@ impl Error {
         Self::Validation {
             field: field.into(),
             message: message.into(),
+        }
+    }
+
+    /// Build an [`Error::Io`] for a path.
+    pub fn io(path: impl Into<PathBuf>, source: std::io::Error) -> Self {
+        Self::Io {
+            path: path.into(),
+            source,
         }
     }
 }
