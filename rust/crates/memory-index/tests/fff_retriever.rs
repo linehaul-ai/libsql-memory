@@ -187,6 +187,20 @@ fn scope_is_applied_before_find_pagination() {
 }
 
 #[test]
+fn find_treats_namespace_glob_metacharacters_literally() {
+    let dir = tempdir().unwrap();
+    write_note(dir.path(), "team[1]/needle.md", "find needle");
+    let r = open_ready(dir.path());
+
+    let hits = r
+        .find_files("needle", Some("team[1]"), false)
+        .expect("literal namespace find");
+
+    assert_eq!(hits.len(), 1, "literal namespace was filtered: {hits:?}");
+    assert_eq!(hits[0].path, Path::new("team[1]/needle.md"));
+}
+
+#[test]
 fn grep_plain_matches_frontmatter_aliases() {
     let dir = tempdir().unwrap();
     seed_corpus(dir.path());
@@ -312,6 +326,34 @@ fn scope_is_applied_before_grep_pagination() {
 
     assert_eq!(hits.len(), 1, "scope page lost the target: {hits:?}");
     assert_eq!(hits[0].path, Path::new("z-wanted/hit.md"));
+}
+
+#[test]
+fn grep_treats_namespace_glob_metacharacters_literally() {
+    let dir = tempdir().unwrap();
+    write_note(
+        dir.path(),
+        "team[1]/note.md",
+        "literal-namespace-grep-needle",
+    );
+    write_note(
+        dir.path(),
+        "team1/noise.md",
+        "literal-namespace-grep-needle",
+    );
+    let r = open_ready(dir.path());
+
+    let hits = r
+        .grep(
+            "literal-namespace-grep-needle",
+            GrepMode::Plain,
+            Some("team[1]"),
+            false,
+        )
+        .expect("literal namespace grep");
+
+    assert_eq!(hits.len(), 1, "literal namespace was filtered: {hits:?}");
+    assert_eq!(hits[0].path, Path::new("team[1]/note.md"));
 }
 
 #[test]

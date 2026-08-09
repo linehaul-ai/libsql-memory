@@ -9,8 +9,8 @@ use fff_search::frecency::FrecencyTracker;
 use fff_search::grep::{parse_grep_query, GrepMode as FffGrepMode, GrepSearchOptions};
 use fff_search::query_tracker::QueryTracker;
 use fff_search::{
-    Constraint, FFFMode, FilePickerOptions, FuzzySearchOptions, PaginationArgs, QueryParser,
-    SharedFilePicker, SharedFrecency, SharedQueryTracker,
+    FFFMode, FilePickerOptions, FuzzySearchOptions, PaginationArgs, QueryParser, SharedFilePicker,
+    SharedFrecency, SharedQueryTracker,
 };
 use memory_core::{
     ContentHit, Error, FileHit, GrepMode, IndexSnapshot, IndexState, Result, Retriever,
@@ -312,40 +312,45 @@ fn find_in_picker(
     scope: Option<&str>,
     prefix: Option<&Path>,
 ) -> Vec<FileHit> {
-    let mut parsed = QueryParser::default().parse(query);
-    let scope_glob = scope
-        .filter(|s| !s.is_empty())
-        .map(|scope| format!("{scope}/**"));
-    if let Some(scope_glob) = scope_glob.as_deref() {
-        parsed.constraints.push(Constraint::Glob(scope_glob));
-    }
-    let results = picker.fuzzy_search(
-        &parsed,
-        query_tracker,
-        FuzzySearchOptions {
-            max_threads: 0,
-            current_file: None,
-            pagination: PaginationArgs {
-                offset: 0,
-                limit: PAGE_LIMIT,
+    let parsed = QueryParser::default().parse(query);
+    let mut hits = Vec::new();
+    let mut offset = 0;
+    loop {
+        let results = picker.fuzzy_search(
+            &parsed,
+            query_tracker,
+            FuzzySearchOptions {
+                max_threads: 0,
+                current_file: None,
+                pagination: PaginationArgs {
+                    offset,
+                    limit: PAGE_LIMIT,
+                },
+                ..Default::default()
             },
-            ..Default::default()
-        },
-    );
-    let mut hits: Vec<FileHit> = results
-        .items
-        .iter()
-        .zip(results.scores.iter())
-        .filter_map(|(item, score)| {
-            let logical = PathBuf::from(item.relative_path(picker));
-            keep_path(&logical, scope).then(|| FileHit {
-                path: prefix.map_or(logical.clone(), |p| p.join(&logical)),
-                score: score.total as f32,
+        );
+        let page_len = results.items.len();
+        let total_matched = results.total_matched;
+        let mut page: Vec<FileHit> = results
+            .items
+            .iter()
+            .zip(results.scores.iter())
+            .filter_map(|(item, score)| {
+                let logical = PathBuf::from(item.relative_path(picker));
+                keep_path(&logical, scope).then(|| FileHit {
+                    path: prefix.map_or(logical.clone(), |p| p.join(&logical)),
+                    score: score.total as f32,
+                })
             })
-        })
-        .collect();
-    normalize_file_hits(&mut hits);
-    hits
+            .collect();
+        normalize_file_hits(&mut page);
+        hits.extend(page);
+        if hits.len() >= PAGE_LIMIT || page_len == 0 || offset + page_len >= total_matched {
+            hits.truncate(PAGE_LIMIT);
+            return hits;
+        }
+        offset += page_len;
+    }
 }
 
 fn grep_in_picker(
@@ -355,13 +360,7 @@ fn grep_in_picker(
     scope: Option<&str>,
     prefix: Option<&Path>,
 ) -> Vec<ContentHit> {
-    let mut parsed = parse_grep_query(query);
-    let scope_glob = scope
-        .filter(|s| !s.is_empty())
-        .map(|scope| format!("{scope}/**"));
-    if let Some(scope_glob) = scope_glob.as_deref() {
-        parsed.constraints.push(Constraint::Glob(scope_glob));
-    }
+    let parsed = parse_grep_query(query);
     let mut hits = Vec::new();
     let mut file_offset = 0;
     loop {

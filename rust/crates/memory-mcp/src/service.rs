@@ -263,12 +263,12 @@ impl MemoryService {
             .map_err(|e| stage_error("grep_plain", query, scope, &e.to_string()))?;
 
         for h in find_hits {
-            if keep_path(&h.path, opts.include_archived) {
+            if keep_path(self.store.root(), &h.path, opts.include_archived) {
                 file_raw.push((h.path, h.score));
             }
         }
         for h in plain_hits {
-            if keep_path(&h.path, opts.include_archived) {
+            if keep_path(self.store.root(), &h.path, opts.include_archived) {
                 plain_raw.push((h.path, h.score, h.snippet));
             }
         }
@@ -282,7 +282,7 @@ impl MemoryService {
                 .grep(query, GrepMode::Fuzzy, scope, opts.include_archived)
                 .map_err(|e| stage_error("grep_fuzzy", query, scope, &e.to_string()))?;
             for h in hits {
-                if keep_path(&h.path, opts.include_archived) {
+                if keep_path(self.store.root(), &h.path, opts.include_archived) {
                     fuzzy_raw.push((h.path, h.score, h.snippet));
                 }
             }
@@ -489,7 +489,7 @@ fn stage_error(stage: &str, query: &str, scope: Option<&str>, detail: &str) -> E
     ))
 }
 
-fn keep_path(path: &Path, include_archived: bool) -> bool {
+fn keep_path(root: &Path, path: &Path, include_archived: bool) -> bool {
     let archived = path.components().any(|c| c.as_os_str() == ".archive");
     let index = path.components().any(|c| c.as_os_str() == ".index");
     if index {
@@ -497,6 +497,14 @@ fn keep_path(path: &Path, include_archived: bool) -> bool {
     }
     if archived && !include_archived {
         return false;
+    }
+    if archived {
+        let Ok(logical) = path.strip_prefix(".archive") else {
+            return false;
+        };
+        if root.join(logical).is_file() {
+            return false;
+        }
     }
     path.extension().and_then(|e| e.to_str()) == Some("md")
 }
@@ -808,6 +816,47 @@ mod tests {
         assert_eq!(response.results[0].handle, "proj/same");
         assert_eq!(response.results[0].title, "Active Note");
         assert_eq!(svc.read("proj/same").unwrap().body.trim(), "active body");
+    }
+
+    #[test]
+    fn archived_hit_is_shadowed_when_same_handle_is_active() {
+        let dir = tempdir().unwrap();
+        seed_note(
+            dir.path(),
+            "proj/same.md",
+            "Active Note",
+            &["current note", "live note"],
+            "active body",
+        );
+        seed_note(
+            dir.path(),
+            ".archive/proj/same.md",
+            "Archived Note",
+            &["retired note", "old note"],
+            "archive-only-needle",
+        );
+        let fake = FakeRetriever {
+            state: IndexState::Ready,
+            contents: Mutex::new(vec![ContentHit {
+                path: PathBuf::from(".archive/proj/same.md"),
+                snippet: "archive-only-needle".into(),
+                line: 8,
+                score: 1.0,
+            }]),
+            ..FakeRetriever::ready()
+        };
+        let svc = MemoryService::new(dir.path(), Some(Arc::new(fake)));
+
+        let response = svc
+            .search(SearchOptions {
+                query: "archive-only-needle".into(),
+                namespace: Some("proj".into()),
+                include_archived: true,
+                ..Default::default()
+            })
+            .expect("shadowed archive search");
+
+        assert!(response.results.is_empty(), "response={response:?}");
     }
 
     struct BarrierRetriever {
