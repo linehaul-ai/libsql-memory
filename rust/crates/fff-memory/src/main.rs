@@ -34,7 +34,7 @@ struct Cli {
     #[arg(long, global = true, value_name = "PATH")]
     config: Option<PathBuf>,
 
-    /// Use PATH/.memory (omit PATH after the subcommand to use the current directory).
+    /// Use PATH/.memory. Safe bare form: search QUERY --project. Explicit path: --project=PATH.
     #[arg(
         long,
         global = true,
@@ -159,7 +159,12 @@ async fn main() -> ExitCode {
 
 async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     let root = config::resolve_root(cli.root, cli.config, cli.project)?;
-    std::fs::create_dir_all(&root)?;
+    std::fs::create_dir_all(&root).map_err(|error| {
+        format!(
+            "cannot create memory root {}: {error}; choose a writable directory with --root PATH or remove any conflicting file",
+            root.display()
+        )
+    })?;
 
     match cli.command {
         Command::Serve => {

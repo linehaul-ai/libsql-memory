@@ -519,6 +519,46 @@ fn reindex_recreates_fff_dbs_but_preserves_access_log() {
     assert!(!index.join("queries/stale-marker").exists());
 }
 
+#[cfg(unix)]
+#[test]
+fn rebuild_unlinks_symlinked_index_without_touching_its_target() {
+    use std::os::unix::fs::symlink;
+
+    let root = tempdir().unwrap();
+    let external = tempdir().unwrap();
+    fs::create_dir(external.path().join("frecency")).unwrap();
+    fs::create_dir(external.path().join("queries")).unwrap();
+    fs::write(external.path().join("sentinel"), "outside").unwrap();
+    fs::write(
+        external.path().join("frecency/sentinel"),
+        "outside-frecency",
+    )
+    .unwrap();
+    fs::write(external.path().join("queries/sentinel"), "outside-queries").unwrap();
+    symlink(external.path(), root.path().join(".index")).unwrap();
+
+    let retriever = FffRetriever::rebuild(root.path()).expect("rebuild safe local index");
+
+    let index_metadata = fs::symlink_metadata(root.path().join(".index")).unwrap();
+    assert!(index_metadata.is_dir());
+    assert!(!index_metadata.file_type().is_symlink());
+    assert!(root.path().join(".index/frecency").is_dir());
+    assert!(root.path().join(".index/queries").is_dir());
+    assert_eq!(
+        fs::read_to_string(external.path().join("sentinel")).unwrap(),
+        "outside"
+    );
+    assert_eq!(
+        fs::read_to_string(external.path().join("frecency/sentinel")).unwrap(),
+        "outside-frecency"
+    );
+    assert_eq!(
+        fs::read_to_string(external.path().join("queries/sentinel")).unwrap(),
+        "outside-queries"
+    );
+    drop(retriever);
+}
+
 #[test]
 fn external_file_edit_becomes_searchable_without_reindex() {
     let dir = tempdir().unwrap();

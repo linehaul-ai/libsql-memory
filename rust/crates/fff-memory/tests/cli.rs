@@ -89,6 +89,8 @@ fn help_lists_exactly_the_eight_commands() {
         .filter_map(|line| line.split_whitespace().next())
         .collect();
     assert_eq!(commands, expected);
+    assert!(stdout.contains("search QUERY --project"), "stdout={stdout}");
+    assert!(stdout.contains("--project=PATH"), "stdout={stdout}");
     for command in expected {
         let sub = output(&[command, "--help"]);
         assert_success(&sub);
@@ -254,6 +256,12 @@ fn root_precedence_is_flag_then_env_then_config_then_xdg_default() {
         .args(["read", HANDLE]);
     assert_eq!(read_body(&mut command), "default");
 
+    let mut command = bin();
+    command
+        .env("XDG_DATA_HOME", &xdg_data)
+        .args(["read", HANDLE]);
+    assert_eq!(read_body(&mut command), "default");
+
     let home = dir.path().join("home-default");
     seed(
         &home.join(".local/share/fff-memory"),
@@ -358,6 +366,12 @@ fn project_selects_dot_memory_and_conflicts_only_with_explicit_root() {
         .args(["read", HANDLE]);
     assert_eq!(read_body(&mut command), "project");
 
+    let mut command = bin();
+    command
+        .arg(format!("--project={}", project.display()))
+        .args(["read", HANDLE]);
+    assert_eq!(read_body(&mut command), "project");
+
     let out = bin()
         .args(["read", HANDLE, "--project"])
         .arg(&project)
@@ -375,6 +389,13 @@ fn project_selects_dot_memory_and_conflicts_only_with_explicit_root() {
         .current_dir(&cwd_project)
         .args(["read", HANDLE, "--project"]);
     assert_eq!(read_body(&mut command), "cwd-project");
+
+    let out = bin()
+        .current_dir(&cwd_project)
+        .args(["search", "resolver", "--project"])
+        .output()
+        .unwrap();
+    assert!(json_stdout(&out)["results"].is_array());
 }
 
 #[test]
@@ -443,6 +464,26 @@ fn missing_default_config_is_harmless() {
         .env("XDG_CONFIG_HOME", dir.path().join("empty-config"))
         .args(["read", HANDLE]);
     assert_eq!(read_body(&mut command), "default without config");
+}
+
+#[test]
+fn invalid_root_error_names_path_and_fix_without_stdout() {
+    let dir = tempdir().unwrap();
+    let root = dir.path().join("not-a-directory");
+    fs::write(&root, "file blocks root directory").unwrap();
+
+    let out = bin().args(["stats", "--root"]).arg(&root).output().unwrap();
+
+    assert!(!out.status.success());
+    assert!(
+        out.stdout.is_empty(),
+        "stdout={}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains(root.to_str().unwrap()), "stderr={stderr}");
+    assert!(stderr.contains("writable directory"), "stderr={stderr}");
+    assert!(stderr.contains("conflicting file"), "stderr={stderr}");
 }
 
 #[test]

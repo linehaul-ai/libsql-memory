@@ -56,5 +56,5 @@ project = "--project [PATH] selects PATH/.memory (PATH defaults to .) and overri
 root_precedence = "--root PATH > FFF_MEMORY_ROOT > config root > ${XDG_DATA_HOME}/fff-memory > ${HOME}/.local/share/fff-memory"
 config_precedence = "--config PATH > FFF_MEMORY_CONFIG > ${XDG_CONFIG_HOME}/fff-memory/config.json > ${HOME}/.config/fff-memory/config.json"
 config_schema = '''{"root":"/path"}; unknown keys, missing root, wrong types, and malformed JSON are rejected with the selected path and fix guidance'''
-missing_config = "absence is harmless only for the default-discovered config path; an explicitly selected --config/FFF_MEMORY_CONFIG path must exist and parse even when a higher-priority root source wins"
+missing_config = "absence of a default-discovered config file or of both HOME/XDG_CONFIG_HOME is harmless; an explicitly selected --config/FFF_MEMORY_CONFIG path must exist and parse even when a higher-priority root source wins"
 path_semantics = "PathBuf values are used as supplied; config-relative roots are not rebased"

@@ -109,8 +109,16 @@ impl FffRetriever {
     /// `.index/access.jsonl` are preserved.
     pub fn rebuild(root: impl AsRef<Path>) -> Result<Self> {
         let root = root.as_ref();
-        remove_disposable_path(&root.join(".index/frecency"))?;
-        remove_disposable_path(&root.join(".index/queries"))?;
+        let index = root.join(".index");
+        match std::fs::symlink_metadata(&index) {
+            Ok(metadata) if metadata.is_dir() => {
+                remove_disposable_path(&index.join("frecency"))?;
+                remove_disposable_path(&index.join("queries"))?;
+            }
+            Ok(_) => remove_disposable_path(&index)?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(Error::io(&index, error)),
+        }
         Self::open(root)
     }
 

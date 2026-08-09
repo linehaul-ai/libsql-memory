@@ -45,7 +45,9 @@ pub fn resolve_root(
         return Ok(root);
     }
 
-    let config_path = default_config_path()?;
+    let Some(config_path) = default_config_path() else {
+        return default_root();
+    };
     match fs::read_to_string(&config_path) {
         Ok(contents) => parse_config(&config_path, &contents),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => default_root(),
@@ -84,11 +86,11 @@ fn parse_config(path: &Path, contents: &str) -> Result<PathBuf, ResolveError> {
         })
 }
 
-fn default_config_path() -> Result<PathBuf, ResolveError> {
+fn default_config_path() -> Option<PathBuf> {
     if let Some(root) = env_path("XDG_CONFIG_HOME") {
-        return Ok(root.join("fff-memory/config.json"));
+        return Some(root.join("fff-memory/config.json"));
     }
-    home().map(|home| home.join(".config/fff-memory/config.json"))
+    env_path("HOME").map(|home| home.join(".config/fff-memory/config.json"))
 }
 
 fn default_root() -> Result<PathBuf, ResolveError> {
