@@ -6,9 +6,10 @@
 //! - Disk writes are temp + fsync + rename in the target directory.
 
 use std::fs::{self, File, OpenOptions};
-use std::io::Write;
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
+use fs2::FileExt;
 use time::{Date, OffsetDateTime};
 
 use crate::error::{Error, Result};
@@ -530,14 +531,16 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
         )
     })?;
 
-    // Best-effort fsync of the directory entry (rename durability) on Unix.
-    #[cfg(unix)]
-    {
-        if let Ok(dir_file) = File::open(dir) {
-            let _ = dir_file.sync_all();
-        }
-    }
+    sync_directory(dir)?;
 
+    Ok(())
+}
+
+pub(crate) fn sync_directory(dir: &Path) -> Result<()> {
+    #[cfg(unix)]
+    File::open(dir)
+        .and_then(|file| file.sync_all())
+        .map_err(|e| Error::io(dir, e))?;
     Ok(())
 }
 
@@ -545,17 +548,29 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
 pub fn ensure_index_ignored(root: &Path) -> Result<()> {
     fs::create_dir_all(root).map_err(|e| Error::io(root, e))?;
     let path = root.join(".gitignore");
-    let existing = match fs::symlink_metadata(&path) {
+    let existed = match fs::symlink_metadata(&path) {
         Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
             return Err(Error::validation(
                 ".gitignore",
                 format!("{} must be a regular file", path.display()),
             ));
         }
-        Ok(_) => fs::read(&path).map_err(|e| Error::io(&path, e))?,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Ok(_) => true,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
         Err(error) => return Err(Error::io(&path, error)),
     };
+
+    let mut file = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(&path)
+        .map_err(|e| Error::io(&path, e))?;
+    file.lock_exclusive().map_err(|e| Error::io(&path, e))?;
+    let mut existing = Vec::new();
+    file.read_to_end(&mut existing)
+        .map_err(|e| Error::io(&path, e))?;
 
     if existing
         .split(|byte| *byte == b'\n')
@@ -570,13 +585,13 @@ pub fn ensure_index_ignored(root: &Path) -> Result<()> {
     }
     addition.extend_from_slice(b"/.index/\n");
 
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
+    file.seek(SeekFrom::End(0))
         .map_err(|e| Error::io(&path, e))?;
     file.write_all(&addition).map_err(|e| Error::io(&path, e))?;
     file.sync_all().map_err(|e| Error::io(&path, e))?;
+    if !existed {
+        sync_directory(root)?;
+    }
     Ok(())
 }
 

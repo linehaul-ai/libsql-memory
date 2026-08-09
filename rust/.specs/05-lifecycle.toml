@@ -17,7 +17,7 @@ embedded use, it supplements ranking; if not, nothing breaks — the access log
 is the authority for lifecycle decisions either way.
 """
 compaction = "doctor rolls entries older than 90 days into per-note, per-via counters"
-integrity = "append, snapshot, and compaction coordinate across processes through .index/access.lock"
+integrity = "append, snapshot, and compaction coordinate across processes through .index/access.lock; same-response search hits append under one lock/write without a response-blocking disk barrier, while reads and explicit lifecycle events sync file data plus a newly created directory entry before returning"
 recovery = "access_counts.json stores an inclusive compacted_through RFC3339 cutoff; counters are replaced before the compacted log, both replacements use the shared fsync-and-rename path including parent-directory sync, and readers ignore source events at or before the cutoff so interruption is idempotent"
 validation = "every nonblank JSONL line is parsed strictly; errors name the access-log path and physical line number"
 snapshot = "one fallible, coherent snapshot exposes per-via recent counts and whether each handle was ever accessed"
@@ -27,7 +27,7 @@ rule = "memory_read records an access event; search hits record a lighter-weight
 effect = "frequently retrieved notes gain a ranking multiplier — emergent spaced repetition"
 weight = "ranking reinforcement is read + 0.25 * search_hit; why text reports Nr+Ms/30d"
 non_effect = "reads never touch the note file itself (updated stays a content timestamp; mtime stays meaningful for the watcher)"
-backend = "search results that survive limit and budget shaping are recorded in the authoritative access log; memory_read sends the selected active-or-archived path once to the retriever's best-effort frecency tracker, avoiding one durable backend transaction per merely exposed result"
+backend = "search results that survive limit and budget shaping are recorded in the authoritative access log; memory_read sends a selected active indexed path once to the retriever's best-effort frecency tracker, avoiding one durable backend transaction per merely exposed result; archived reads stay access-log-only because the archive picker is short-lived"
 
 [decay]
 philosophy = "decay is advisory, then reversible, and only ever destructive by explicit human choice"
@@ -47,6 +47,7 @@ checks = [
 ]
 output = "human-readable report; --apply performs archive moves and compaction, prints a suggested git commit message"
 failure_policy = "doctor validates one coherent access snapshot before decay decisions; --apply performs no archive moves when lifecycle state is corrupt"
+filesystem_boundary = "doctor walks with no symlink following; a symlinked file or directory below the memory root is excluded from candidates, link resolution, and --apply so external targets are never read or moved"
 index_check = "doctor opens the retriever by default, verifies that each backend-neutral live indexed path still names a file under the memory root, reports healthy indexes without a warning, and suggests reindex for stale/orphaned paths even when another unindexed file makes the totals equal; live indexed non-note files are valid, and index-open failure remains fail-open for file and lifecycle inspection"
 
 [reindex]

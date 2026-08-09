@@ -323,9 +323,9 @@ impl MemoryService {
         let ranked = rank_hits(merged, &meta);
 
         let budgeted = apply_budget(ranked, opts.limit, opts.budget_bytes, &stages, &scope_label);
-        for hit in &budgeted.results {
-            let _ = self.access.append(&hit.handle, AccessVia::SearchHit);
-        }
+        let _ = self
+            .access
+            .append_search_hits(budgeted.results.iter().map(|hit| hit.handle.as_str()));
         Ok(budgeted.into())
     }
 
@@ -333,16 +333,17 @@ impl MemoryService {
     pub fn read(&self, handle: &str) -> Result<ReadOutcome> {
         let (ns, slug) = parse_handle(handle)?;
         let relative = MemoryStore::relative_path(&ns, &slug);
-        let backend_path = if self.store.root().join(&relative).is_file() {
-            relative
-        } else {
-            PathBuf::from(".archive").join(relative)
-        };
+        let backend_path = self
+            .store
+            .root()
+            .join(&relative)
+            .is_file()
+            .then_some(relative);
         let note = self.read_active_or_archived(&ns, &slug)?;
         let handle_norm = MemoryStore::handle(&ns, &slug);
         let _ = self.access.append(&handle_norm, AccessVia::Read);
-        if let Some(retriever) = &self.retriever {
-            let _ = retriever.track_access(&backend_path);
+        if let (Some(retriever), Some(path)) = (&self.retriever, backend_path.as_deref()) {
+            let _ = retriever.track_access(path);
         }
 
         let mut linked = Vec::new();
@@ -1509,7 +1510,7 @@ mod tests {
     }
 
     #[test]
-    fn read_reinforces_the_selected_backend_path() {
+    fn read_reinforces_active_backend_path_and_logs_archived_reads() {
         let dir = tempdir().unwrap();
         seed_note(
             dir.path(),
@@ -1531,10 +1532,8 @@ mod tests {
         svc.forget("proj/selected", false).unwrap();
         fake.tracked.lock().unwrap().clear();
         svc.read("proj/selected").unwrap();
-        assert_eq!(
-            fake.tracked.lock().unwrap().as_slice(),
-            &[PathBuf::from(".archive/proj/selected.md")]
-        );
+        assert!(fake.tracked.lock().unwrap().is_empty());
+        assert_eq!(svc.access.count_recent("proj/selected", 30), 2);
     }
 
     #[test]

@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 
 use serde_json::Value;
 use tempfile::tempdir;
@@ -406,12 +406,23 @@ fn project_memory_root_ignores_index_without_overwriting_existing_rules() {
     fs::create_dir_all(&root).unwrap();
     fs::write(root.join(".gitignore"), "keep-this-rule\n").unwrap();
 
-    for _ in 0..2 {
-        let out = bin()
-            .args(["stats", "--project"])
-            .arg(&project)
-            .output()
-            .unwrap();
+    let index = root.join(".index");
+    fs::create_dir(&index).unwrap();
+    fs::write(index.join("frecency"), "force retrieval fallback").unwrap();
+
+    let children: Vec<_> = (0..20)
+        .map(|_| {
+            bin()
+                .args(["stats", "--project"])
+                .arg(&project)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap()
+        })
+        .collect();
+    for child in children {
+        let out = child.wait_with_output().unwrap();
         assert_success(&out);
     }
 

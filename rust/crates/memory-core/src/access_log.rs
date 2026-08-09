@@ -169,53 +169,102 @@ impl AccessLog {
     /// Append one event at the current UTC time (creates parent dirs).
     pub fn append(&self, handle: &str, via: AccessVia) -> Result<()> {
         let _lock = self.lock_exclusive()?;
-        let ts = OffsetDateTime::now_utc()
-            .format(&time::format_description::well_known::Rfc3339)
-            .unwrap_or_else(|_| "1970-01-01T00:00:00Z".into());
-        self.append_event_locked(AccessEvent {
-            ts,
+        self.append_events_locked(vec![self.current_event(handle, via)], true)
+    }
+
+    /// Append lightweight search exposures under one lock and write.
+    pub fn append_search_hits<I, S>(&self, handles: I) -> Result<()>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let handles: Vec<String> = handles
+            .into_iter()
+            .map(|handle| handle.as_ref().to_string())
+            .collect();
+        if handles.is_empty() {
+            return Ok(());
+        }
+        let _lock = self.lock_exclusive()?;
+        self.append_events_locked(
+            handles
+                .into_iter()
+                .map(|handle| self.current_event(&handle, AccessVia::SearchHit))
+                .collect(),
+            false,
+        )
+    }
+
+    fn current_event(&self, handle: &str, via: AccessVia) -> AccessEvent {
+        AccessEvent {
+            ts: OffsetDateTime::now_utc()
+                .format(&time::format_description::well_known::Rfc3339)
+                .unwrap_or_else(|_| "1970-01-01T00:00:00Z".into()),
             handle: handle.to_string(),
             via,
-        })
+        }
     }
 
     /// Append a fully specified event (used by tests and compaction rewrites).
     pub fn append_event(&self, event: AccessEvent) -> Result<()> {
         let _lock = self.lock_exclusive()?;
-        self.append_event_locked(event)
+        self.append_events_locked(vec![event], true)
     }
 
-    fn append_event_locked(&self, event: AccessEvent) -> Result<()> {
-        let event_ts = parse_ts(&event.ts).ok_or_else(|| {
-            Error::validation(
-                "access_log",
-                format!("invalid RFC3339 timestamp {:?}", event.ts),
-            )
-        })?;
+    fn append_events_locked(&self, events: Vec<AccessEvent>, sync: bool) -> Result<()> {
         let mut counters = self.load_counters_unlocked()?;
-        if self
-            .parse_compacted_through(&counters)?
-            .is_some_and(|cutoff| event_ts <= cutoff)
-        {
-            counters
-                .by_handle
-                .entry(event.handle)
-                .or_default()
-                .add(event.via);
-            return self.write_counters_unlocked(&counters);
+        let cutoff = self.parse_compacted_through(&counters)?;
+        let mut source = Vec::new();
+        let mut counters_changed = false;
+        for event in events {
+            let event_ts = parse_ts(&event.ts).ok_or_else(|| {
+                Error::validation(
+                    "access_log",
+                    format!("invalid RFC3339 timestamp {:?}", event.ts),
+                )
+            })?;
+            if cutoff.is_some_and(|cutoff| event_ts <= cutoff) {
+                counters
+                    .by_handle
+                    .entry(event.handle)
+                    .or_default()
+                    .add(event.via);
+                counters_changed = true;
+            } else {
+                source.push(event);
+            }
         }
-        self.append_event_unlocked(&event)
+        if counters_changed {
+            self.write_counters_unlocked(&counters)?;
+        }
+        self.append_events_unlocked(&source, sync)
     }
 
-    fn append_event_unlocked(&self, event: &AccessEvent) -> Result<()> {
-        let line = serde_json::to_string(&event)
-            .map_err(|e| Error::validation("access_log", format!("serialize event: {e}")))?;
+    fn append_events_unlocked(&self, events: &[AccessEvent], sync: bool) -> Result<()> {
+        if events.is_empty() {
+            return Ok(());
+        }
+        let mut bytes = Vec::new();
+        for event in events {
+            serde_json::to_writer(&mut bytes, event)
+                .map_err(|e| Error::validation("access_log", format!("serialize event: {e}")))?;
+            bytes.push(b'\n');
+        }
+        let created = !self.path.exists();
         let mut f = OpenOptions::new()
             .create(true)
             .append(true)
             .open(&self.path)
             .map_err(|e| Error::io(&self.path, e))?;
-        writeln!(f, "{line}").map_err(|e| Error::io(&self.path, e))?;
+        f.write_all(&bytes).map_err(|e| Error::io(&self.path, e))?;
+        // ponytail: search exposures rely on the OS writeback cache; add a shared
+        // group-commit worker only if losing the final few hits proves material.
+        if sync {
+            f.sync_data().map_err(|e| Error::io(&self.path, e))?;
+        }
+        if created {
+            crate::store::sync_directory(self.path.parent().unwrap_or_else(|| Path::new(".")))?;
+        }
         Ok(())
     }
 
@@ -513,6 +562,19 @@ mod tests {
             }
         );
         assert!(snapshot.ever_accessed("proj/a"));
+    }
+
+    #[test]
+    fn append_search_hits_records_every_handle_under_one_call() {
+        let dir = tempdir().unwrap();
+        let log = AccessLog::open(dir.path());
+
+        log.append_search_hits(["proj/a", "proj/b", "proj/a"])
+            .unwrap();
+
+        assert_eq!(log.len(), 3);
+        assert_eq!(log.count_recent("proj/a", 30), 2);
+        assert_eq!(log.count_recent("proj/b", 30), 1);
     }
 
     #[test]

@@ -47,7 +47,7 @@ per_result = [
 ]
 why_provenance = "content matches retain their 1-based matched line and structurally classified frontmatter/body field through merge and rank; alias why text names the alias that actually matched, including later block-list aliases"
 overflow = "limit caps admitted full results, so an oversized candidate does not consume a limit slot; results not admitted by the limit or snippet budget are returned as bare slug+title lines under a 'more' key; more entries are outside budget_bytes"
-reinforcement = "append lightweight search_hit access events only for handles present in shaped results, never for more or other overflow; backend frecency is reinforced once on memory_read, when exposure becomes an actual selection"
+reinforcement = "append lightweight search_hit access events only for handles present in shaped results, never for more or other overflow; backend frecency is reinforced once when memory_read selects an active indexed note, while archived reads remain reinforced by the authoritative access log"
 no_silent_empty = """
 An empty result set must say what was tried: stages run, scope searched, and a
 hint ('try broader terms or namespace=\"\"'). The predecessor failed silently
