@@ -47,7 +47,7 @@ checks = [
 ]
 output = "human-readable report; --apply performs archive moves and compaction, prints a suggested git commit message"
 failure_policy = "doctor validates one coherent access snapshot before decay decisions; --apply performs no archive moves when lifecycle state is corrupt"
-index_check = "doctor opens the retriever by default, reports ready healthy indexes without a warning, and suggests reindex when the backend-neutral live indexed-file count exceeds the active memory-note count; index-open failure remains fail-open for file and lifecycle inspection"
+index_check = "doctor opens the retriever by default, compares backend-neutral live indexed paths with active memory-note paths, reports healthy indexes without a warning, and suggests reindex for orphaned paths even when missing notes make the totals equal; index-open failure remains fail-open for file and lifecycle inspection"
 
 [reindex]
 command = "fff-memory reindex"

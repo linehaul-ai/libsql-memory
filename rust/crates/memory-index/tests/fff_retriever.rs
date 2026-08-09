@@ -1,7 +1,7 @@
 //! Integration tests: real fff-search against a temp markdown corpus (spec 03/06).
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use memory_core::{ContentMatch, GrepMode, IndexState, Retriever};
@@ -113,6 +113,16 @@ fn index_snapshot_reports_live_files_and_scan_time() {
     assert_eq!(snapshot.state, IndexState::Ready);
     assert_eq!(snapshot.files_indexed, 3);
     assert!(snapshot.last_scan_ms > 0, "snapshot={snapshot:?}");
+    let mut paths = r.indexed_paths().unwrap();
+    paths.sort();
+    assert_eq!(
+        paths,
+        vec![
+            PathBuf::from("linehaul/deploy.md"),
+            PathBuf::from("linehaul/rates.md"),
+            PathBuf::from("other/session.md"),
+        ]
+    );
 }
 
 #[test]

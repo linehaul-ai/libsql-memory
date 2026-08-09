@@ -115,6 +115,11 @@ pub trait Retriever: Send + Sync {
         }
     }
 
+    /// Live indexed paths relative to the memory root, when exposed by the backend.
+    fn indexed_paths(&self) -> Result<Vec<PathBuf>> {
+        Ok(Vec::new())
+    }
+
     /// Reinforce a retrieved path in backend ranking; callers treat errors as best-effort.
     fn track_access(&self, _path: &Path) -> Result<()> {
         Ok(())
@@ -241,6 +246,16 @@ pub mod testing {
                 files_indexed: self.files.lock().unwrap().len() as u64,
                 last_scan_ms: 0,
             }
+        }
+
+        fn indexed_paths(&self) -> Result<Vec<PathBuf>> {
+            Ok(self
+                .files
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|hit| hit.path.clone())
+                .collect())
         }
 
         fn reindex(&self) -> Result<()> {

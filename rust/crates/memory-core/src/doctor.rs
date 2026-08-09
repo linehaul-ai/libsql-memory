@@ -252,23 +252,43 @@ pub fn run_doctor(
         }
     }
 
-    let index_hint = match retriever.map(|r| r.index_snapshot()) {
-        Some(snapshot)
-            if snapshot.state == IndexState::Ready
-                && snapshot.files_indexed > notes.len() as u64 =>
-        {
-            let orphaned = snapshot.files_indexed - notes.len() as u64;
-            Some(format!(
-                "{orphaned} orphaned index {} detected; run `fff-memory reindex`",
-                if orphaned == 1 {
-                    "entry"
-                } else {
-                    "entries"
+    let index_hint = match retriever {
+        Some(retriever) if retriever.index_state() == IndexState::Ready => {
+            match retriever.indexed_paths() {
+                Ok(indexed_paths) => {
+                    let active_paths: std::collections::HashSet<_> =
+                        notes.iter().map(|(path, _)| path).collect();
+                    let mut orphaned: Vec<_> = indexed_paths
+                        .iter()
+                        .filter(|path| !active_paths.contains(path))
+                        .collect();
+                    orphaned.sort();
+                    if orphaned.is_empty() {
+                        None
+                    } else {
+                        let examples = orphaned
+                            .iter()
+                            .take(3)
+                            .map(|path| path.display().to_string())
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        Some(format!(
+                            "{} orphaned index {} detected ({examples}); run `fff-memory reindex`",
+                            orphaned.len(),
+                            if orphaned.len() == 1 {
+                                "entry"
+                            } else {
+                                "entries"
+                            }
+                        ))
+                    }
                 }
-            ))
+                Err(error) => Some(format!(
+                    "index paths unavailable: {error}; run `fff-memory reindex`"
+                )),
+            }
         }
-        Some(snapshot) if snapshot.state == IndexState::Ready => None,
-        Some(snapshot) if snapshot.state == IndexState::Cold => Some(
+        Some(retriever) if retriever.index_state() == IndexState::Cold => Some(
             "index is cold (scan in progress or incomplete); run `fff-memory reindex` if search is stale"
                 .into(),
         ),
@@ -359,7 +379,7 @@ fn walk_dir(root: &Path, dir: &Path, out: &mut Vec<(PathBuf, Note)>) -> Result<(
 mod tests {
     use super::*;
     use crate::access_log::{AccessEvent, AccessVia};
-    use crate::retriever::testing::FakeRetriever;
+    use crate::retriever::{testing::FakeRetriever, FileHit};
     use tempfile::tempdir;
     use time::format_description::well_known::Rfc3339;
     use time::Duration;
@@ -629,6 +649,28 @@ mod tests {
             "{:?}",
             report.index_hint
         );
+    }
+
+    #[test]
+    fn orphan_check_compares_paths_when_missing_and_extra_counts_cancel_out() {
+        let dir = tempdir().unwrap();
+        write_note(dir.path(), "proj/keep.md", "", "body");
+        write_note(dir.path(), "proj/missing-from-index.md", "", "body");
+        let fake = FakeRetriever::with_files(vec![
+            FileHit {
+                path: PathBuf::from("proj/keep.md"),
+                score: 1.0,
+            },
+            FileHit {
+                path: PathBuf::from("proj/deleted.md"),
+                score: 0.9,
+            },
+        ]);
+
+        let report = run_doctor(dir.path(), Some(&fake), DoctorOptions::default()).unwrap();
+        let hint = report.index_hint.expect("orphan warning");
+        assert!(hint.contains("proj/deleted.md"), "hint={hint}");
+        assert!(hint.contains("fff-memory reindex"), "hint={hint}");
     }
 
     #[test]

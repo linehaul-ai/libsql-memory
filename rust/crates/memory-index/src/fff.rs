@@ -250,6 +250,22 @@ impl Retriever for FffRetriever {
         }
     }
 
+    fn indexed_paths(&self) -> Result<Vec<PathBuf>> {
+        let guard = self
+            .shared_picker
+            .read()
+            .map_err(|e| Error::Retriever(format!("picker lock: {e}")))?;
+        let picker = guard
+            .as_ref()
+            .ok_or_else(|| Error::Retriever("file picker not initialized".into()))?;
+        Ok(picker
+            .get_files()
+            .iter()
+            .filter(|item| !item.is_deleted())
+            .map(|item| PathBuf::from(item.relative_path(picker)))
+            .collect())
+    }
+
     fn track_access(&self, path: &Path) -> Result<()> {
         let absolute = self.root.join(path);
         {
