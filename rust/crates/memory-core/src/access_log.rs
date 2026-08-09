@@ -7,6 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, OnceLock};
 
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
@@ -135,6 +136,7 @@ pub struct AccessLog {
     path: PathBuf,
     counts_path: PathBuf,
     lock_path: PathBuf,
+    safety_validated: Arc<OnceLock<()>>,
 }
 
 struct AccessLock(fs::File);
@@ -153,6 +155,7 @@ impl AccessLog {
             path: index.join("access.jsonl"),
             counts_path: index.join("access_counts.json"),
             lock_path: index.join("access.lock"),
+            safety_validated: Arc::new(OnceLock::new()),
         }
     }
 
@@ -497,16 +500,19 @@ impl AccessLog {
 
     fn lock(&self, exclusive: bool) -> Result<AccessLock> {
         let parent = self.lock_path.parent().unwrap_or_else(|| Path::new("."));
-        if let Some(root) = parent.parent() {
-            crate::store::ensure_index_ignored(root)?;
-            for path in [
-                ".index",
-                ".index/access.lock",
-                ".index/access.jsonl",
-                ".index/access_counts.json",
-            ] {
-                crate::path_safety::safe_join(root, Path::new(path))?;
+        if self.safety_validated.get().is_none() {
+            if let Some(root) = parent.parent() {
+                crate::store::ensure_index_ignored(root)?;
+                for path in [
+                    ".index",
+                    ".index/access.lock",
+                    ".index/access.jsonl",
+                    ".index/access_counts.json",
+                ] {
+                    crate::path_safety::safe_join(root, Path::new(path))?;
+                }
             }
+            let _ = self.safety_validated.set(());
         }
         fs::create_dir_all(parent).map_err(|e| Error::io(parent, e))?;
         let file = OpenOptions::new()

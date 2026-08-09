@@ -8,6 +8,7 @@ use tempfile::tempdir;
 
 #[test]
 #[ignore = "release-mode performance acceptance gate"]
+#[allow(clippy::assertions_on_constants)]
 fn low_thousands_cold_start_and_warm_search_meet_targets() {
     assert!(
         !cfg!(debug_assertions),
