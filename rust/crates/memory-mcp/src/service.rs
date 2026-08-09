@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use crate::search::{
     apply_budget, merge_hits, path_to_handle, rank_hits, BudgetedSearch, MatchStage, NoteMeta,
-    BUDGET_BYTES_DEFAULT, BUDGET_BYTES_MAX, MIN_RESULTS_FOR_FUZZY, SEARCH_LIMIT_DEFAULT,
+    BUDGET_BYTES_DEFAULT, MIN_RESULTS_FOR_FUZZY, SEARCH_LIMIT_DEFAULT,
 };
 use memory_core::{
     extract_wikilinks, AccessLog, AccessSnapshot, AccessVia, GrepMode, IndexState, MemoryStore,
@@ -228,8 +228,8 @@ impl MemoryService {
 
         let mut stages = Vec::new();
         let mut file_raw: Vec<(PathBuf, f32)> = Vec::new();
-        let mut plain_raw: Vec<(PathBuf, f32, String)> = Vec::new();
-        let mut fuzzy_raw: Vec<(PathBuf, f32, String)> = Vec::new();
+        let mut plain_raw = Vec::new();
+        let mut fuzzy_raw = Vec::new();
 
         let Some(retriever) = self.retriever.as_ref() else {
             stages.push(MatchStage::FindFiles);
@@ -269,7 +269,7 @@ impl MemoryService {
         }
         for h in plain_hits {
             if keep_path(self.store.root(), &h.path, opts.include_archived) {
-                plain_raw.push((h.path, h.score, h.snippet));
+                plain_raw.push(h);
             }
         }
 
@@ -283,7 +283,7 @@ impl MemoryService {
                 .map_err(|e| stage_error("grep_fuzzy", query, scope, &e.to_string()))?;
             for h in hits {
                 if keep_path(self.store.root(), &h.path, opts.include_archived) {
-                    fuzzy_raw.push((h.path, h.score, h.snippet));
+                    fuzzy_raw.push(h);
                 }
             }
             merged = merge_hits(&file_raw, &plain_raw, &fuzzy_raw);
@@ -304,8 +304,7 @@ impl MemoryService {
             .iter()
             .map(|hit| (hit.handle.clone(), hit.path.clone()))
             .collect();
-        let budget_bytes = opts.budget_bytes.clamp(1, BUDGET_BYTES_MAX);
-        let budgeted = apply_budget(ranked, opts.limit, budget_bytes, &stages, &scope_label);
+        let budgeted = apply_budget(ranked, opts.limit, opts.budget_bytes, &stages, &scope_label);
         for hit in &budgeted.results {
             let _ = self.access.append(&hit.handle, AccessVia::SearchHit);
             if let Some(path) = backend_paths.get(&hit.handle) {
@@ -606,7 +605,7 @@ pub fn store_action_str(a: StoreAction) -> &'static str {
 mod tests {
     use super::*;
     use memory_core::testing::FakeRetriever;
-    use memory_core::{ContentHit, FileHit, IndexSnapshot};
+    use memory_core::{ContentHit, ContentMatch, FileHit, IndexSnapshot};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Barrier, Mutex};
     use std::time::{Duration, Instant};
@@ -639,6 +638,12 @@ mod tests {
         );
         assert!(parse_handle("").is_err());
         assert!(parse_handle("../x").is_err());
+    }
+
+    #[test]
+    fn search_default_budget_is_4096_bytes() {
+        assert_eq!(SearchOptions::default().budget_bytes, BUDGET_BYTES_DEFAULT);
+        assert_eq!(BUDGET_BYTES_DEFAULT, 4096);
     }
 
     #[test]
@@ -696,6 +701,7 @@ mod tests {
                 snippet: "aliases:\n  - release frequency".into(),
                 line: 3,
                 score: 0.9,
+                matched: ContentMatch::Alias("release frequency".into()),
             }]),
             find_error: Mutex::new(None),
             grep_error: Mutex::new(None),
@@ -718,6 +724,103 @@ mod tests {
         assert!(resp.stages_run.iter().any(|s| s == "find_files"));
         assert!(resp.stages_run.iter().any(|s| s == "grep_plain"));
         assert!(resp.empty_hint.is_none());
+    }
+
+    #[test]
+    fn search_why_names_the_alias_that_matched() {
+        let dir = tempdir().unwrap();
+        seed_note(
+            dir.path(),
+            "proj/shipping.md",
+            "Shipping Cadence",
+            &["first alias", "release frequency"],
+            "We ship weekly.",
+        );
+        let fake = FakeRetriever {
+            state: IndexState::Ready,
+            contents: Mutex::new(vec![ContentHit {
+                path: PathBuf::from("proj/shipping.md"),
+                snippet: "aliases: [first alias, release frequency]".into(),
+                line: 3,
+                score: 1.0,
+                matched: ContentMatch::Alias("release frequency".into()),
+            }]),
+            ..FakeRetriever::ready()
+        };
+        let svc = MemoryService::new(dir.path(), Some(Arc::new(fake)));
+
+        let response = svc
+            .search(SearchOptions {
+                query: "release frequency".into(),
+                namespace: Some("proj".into()),
+                ..Default::default()
+            })
+            .unwrap();
+
+        assert_eq!(response.results[0].why, "alias:release frequency");
+    }
+
+    #[test]
+    fn search_why_reports_title_tags_and_body() {
+        let dir = tempdir().unwrap();
+        for (name, title, body) in [
+            ("title", "Needle Title", "body"),
+            ("tags", "Tag Note", "body"),
+            ("body", "Body Note", "needle body"),
+        ] {
+            seed_note(
+                dir.path(),
+                &format!("proj/{name}.md"),
+                title,
+                &["first alias", "second alias"],
+                body,
+            );
+        }
+        let fake = FakeRetriever {
+            state: IndexState::Ready,
+            contents: Mutex::new(vec![
+                ContentHit {
+                    path: PathBuf::from("proj/title.md"),
+                    snippet: "title: Needle Title".into(),
+                    line: 2,
+                    score: 1.0,
+                    matched: ContentMatch::Title,
+                },
+                ContentHit {
+                    path: PathBuf::from("proj/tags.md"),
+                    snippet: "- needle".into(),
+                    line: 6,
+                    score: 0.9,
+                    matched: ContentMatch::Tags,
+                },
+                ContentHit {
+                    path: PathBuf::from("proj/body.md"),
+                    snippet: "needle body".into(),
+                    line: 9,
+                    score: 0.8,
+                    matched: ContentMatch::Body,
+                },
+            ]),
+            ..FakeRetriever::ready()
+        };
+        let svc = MemoryService::new(dir.path(), Some(Arc::new(fake)));
+
+        let response = svc
+            .search(SearchOptions {
+                query: "needle".into(),
+                namespace: Some("proj".into()),
+                ..Default::default()
+            })
+            .unwrap();
+        let why: HashMap<_, _> = response
+            .results
+            .into_iter()
+            .map(|hit| (hit.handle, hit.why))
+            .collect();
+
+        assert_eq!(why["proj/title"], "title");
+        assert_eq!(why["proj/tags"], "tags");
+        assert_eq!(why["proj/body"], "content");
     }
 
     #[test]
@@ -788,6 +891,7 @@ mod tests {
                 snippet: "retired body".into(),
                 line: 8,
                 score: 1.0,
+                matched: ContentMatch::Body,
             }]),
             ..FakeRetriever::ready()
         };
@@ -882,6 +986,7 @@ mod tests {
                 snippet: "archive-only-needle".into(),
                 line: 8,
                 score: 1.0,
+                matched: ContentMatch::Body,
             }]),
             ..FakeRetriever::ready()
         };
@@ -1109,7 +1214,7 @@ mod tests {
     }
 
     #[test]
-    fn search_records_only_results_that_survive_shaping() {
+    fn search_reinforces_only_results_not_limit_overflow() {
         let dir = tempdir().unwrap();
         let fake = Arc::new(TrackingRetriever::default());
         let svc = MemoryService::new(dir.path(), Some(fake.clone()));
@@ -1117,14 +1222,42 @@ mod tests {
         let response = svc
             .search(SearchOptions {
                 query: "needle".into(),
-                budget_bytes: 80,
+                limit: 1,
                 ..Default::default()
             })
             .expect("search");
 
         assert_eq!(response.results.len(), 1);
+        assert_eq!(response.results[0].handle, "proj/0");
+        assert_eq!(response.more.len(), 2);
         assert_eq!(svc.access.len(), 1);
-        assert_eq!(fake.tracked.lock().unwrap().len(), 1);
+        assert_eq!(svc.access.count_recent("proj/0", 30), 1);
+        assert_eq!(svc.access.count_recent("proj/1", 30), 0);
+        assert_eq!(svc.access.count_recent("proj/2", 30), 0);
+        assert_eq!(
+            fake.tracked.lock().unwrap().as_slice(),
+            &[PathBuf::from("proj/0.md")]
+        );
+    }
+
+    #[test]
+    fn search_does_not_reinforce_budget_overflow() {
+        let dir = tempdir().unwrap();
+        let fake = Arc::new(TrackingRetriever::default());
+        let svc = MemoryService::new(dir.path(), Some(fake.clone()));
+
+        let response = svc
+            .search(SearchOptions {
+                query: "needle".into(),
+                budget_bytes: 0,
+                ..Default::default()
+            })
+            .expect("search");
+
+        assert!(response.results.is_empty());
+        assert_eq!(response.more.len(), 3);
+        assert_eq!(svc.access.len(), 0);
+        assert!(fake.tracked.lock().unwrap().is_empty());
     }
 
     #[test]

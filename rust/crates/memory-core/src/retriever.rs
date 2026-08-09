@@ -27,6 +27,21 @@ pub struct ContentHit {
     pub line: u32,
     /// Backend score; higher is better.
     pub score: f32,
+    /// Exact note field responsible for the match.
+    pub matched: ContentMatch,
+}
+
+/// Backend-neutral content-match provenance.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ContentMatch {
+    /// The frontmatter title.
+    Title,
+    /// Exact frontmatter alias, or empty when only the alias field is known.
+    Alias(String),
+    /// A frontmatter tag.
+    Tags,
+    /// Markdown body content (or other non-retrieval frontmatter).
+    Body,
 }
 
 /// Grep matching mode for [`Retriever::grep`].

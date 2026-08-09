@@ -32,6 +32,8 @@ pub use doctor::{
 pub use error::{Error, Result};
 pub use links::{extract_wikilinks, Wikilink};
 pub use note::{Note, NoteFrontmatter, NoteType};
-pub use retriever::{testing, ContentHit, FileHit, GrepMode, IndexSnapshot, IndexState, Retriever};
+pub use retriever::{
+    testing, ContentHit, ContentMatch, FileHit, GrepMode, IndexSnapshot, IndexState, Retriever,
+};
 pub use slugify::{slugify, validate_namespace, SLUG_MAX_LEN};
 pub use store::{MemoryStore, MergeMode, StoreAction, StoreInput, StoreOutcome};

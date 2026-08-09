@@ -545,7 +545,7 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
 mod tests {
     use super::*;
     use crate::retriever::testing::FakeRetriever;
-    use crate::retriever::{ContentHit, FileHit};
+    use crate::retriever::{ContentHit, ContentMatch, FileHit};
     use std::sync::Mutex;
     use tempfile::tempdir;
 
@@ -737,6 +737,7 @@ Old fact.
                 snippet: "title: Shipping Cadence".into(),
                 line: 2,
                 score: 5.0,
+                matched: ContentMatch::Title,
             }]),
             find_error: Mutex::new(None),
             grep_error: Mutex::new(None),
@@ -910,6 +911,7 @@ Prior.
                 snippet: "aliases: [shipping cadence, release frequency]".into(),
                 line: 3,
                 score: 1.0,
+                matched: ContentMatch::Alias("shipping cadence".into()),
             }]),
             find_error: Mutex::new(None),
             grep_error: Mutex::new(None),

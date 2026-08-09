@@ -4,7 +4,7 @@ use std::fs;
 use std::path::Path;
 use std::time::Duration;
 
-use memory_core::{GrepMode, IndexState, Retriever};
+use memory_core::{ContentMatch, GrepMode, IndexState, Retriever};
 use memory_index::FffRetriever;
 use tempfile::tempdir;
 
@@ -221,6 +221,83 @@ fn grep_plain_matches_frontmatter_aliases() {
         "archive must be filtered: {hits:?}"
     );
     assert!(hits.iter().all(|h| h.line > 0 || !h.snippet.is_empty()));
+}
+
+#[test]
+fn grep_reports_the_exact_second_block_alias() {
+    let dir = tempdir().unwrap();
+    write_note(
+        dir.path(),
+        "proj/provenance.md",
+        "---\ntitle: Provenance\naliases:\n- first alias\n- release frequency\ntags:\n- freight\ntype: fact\ncreated: 2026-01-01\nupdated: 2026-01-01\n---\nbody\n",
+    );
+    let r = open_ready(dir.path());
+
+    let hits = r
+        .grep("release frequency", GrepMode::Plain, None, false)
+        .expect("grep alias");
+
+    assert_eq!(
+        hits[0].matched,
+        ContentMatch::Alias("release frequency".into())
+    );
+}
+
+#[test]
+fn grep_reports_title_tag_and_body_fields_truthfully() {
+    let dir = tempdir().unwrap();
+    write_note(
+        dir.path(),
+        "proj/fields.md",
+        "---\ntitle: Exact Title Needle\naliases:\n- first alias\n- second alias\ntags:\n- exact-tag-needle\ntype: fact\ncreated: 2026-01-01\nupdated: 2026-01-01\n---\nbody aliases: body-only-needle\n",
+    );
+    let r = open_ready(dir.path());
+
+    let title = r
+        .grep("Exact Title Needle", GrepMode::Plain, None, false)
+        .unwrap();
+    let tag = r
+        .grep("exact-tag-needle", GrepMode::Plain, None, false)
+        .unwrap();
+    let body = r
+        .grep(
+            "body aliases: body-only-needle",
+            GrepMode::Plain,
+            None,
+            false,
+        )
+        .unwrap();
+
+    assert_eq!(title[0].matched, ContentMatch::Title);
+    assert_eq!(tag[0].matched, ContentMatch::Tags);
+    assert_eq!(body[0].matched, ContentMatch::Body);
+}
+
+#[test]
+fn alias_provenance_survives_fuzzy_and_constrained_queries() {
+    let dir = tempdir().unwrap();
+    write_note(
+        dir.path(),
+        "proj/provenance.md",
+        "---\ntitle: Provenance\naliases:\n- first alias\n- release frequency\ntags: []\ntype: fact\ncreated: 2026-01-01\nupdated: 2026-01-01\n---\nbody\n",
+    );
+    let r = open_ready(dir.path());
+
+    let fuzzy = r
+        .grep("relese frequence", GrepMode::Fuzzy, None, false)
+        .expect("fuzzy alias grep");
+    let constrained = r
+        .grep("proj/** release frequency", GrepMode::Plain, None, false)
+        .expect("constrained alias grep");
+
+    assert_eq!(
+        fuzzy[0].matched,
+        ContentMatch::Alias("release frequency".into())
+    );
+    assert_eq!(
+        constrained[0].matched,
+        ContentMatch::Alias("release frequency".into())
+    );
 }
 
 #[test]

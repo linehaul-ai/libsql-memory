@@ -34,6 +34,7 @@ without touching the search stages.
 philosophy = "snippet-first, expand-on-demand; the context window is the scarce resource"
 budget_bytes_default = 4096
 budget_bytes_max = 16384
+budget_accounting = "budget_bytes applies only to the sum of exact serde_json-serialized full result entries; explicit 0 admits no full results, values above the max clamp to the max, and an oversized first result is never force-admitted"
 per_result = [
   "namespace/slug (the handle for memory_read)",
   "title",
@@ -41,7 +42,9 @@ per_result = [
   "why: one compact line, e.g. 'alias:shipping +frecency(3r+8s/30d)' — explainable retrieval",
   "score",
 ]
-overflow = "results beyond the budget are returned as bare slug+title lines under a 'more' key"
+why_provenance = "content matches retain their 1-based matched line and structurally classified frontmatter/body field through merge and rank; alias why text names the alias that actually matched, including later block-list aliases"
+overflow = "results beyond the limit or snippet budget are returned as bare slug+title lines under a 'more' key; more entries are outside budget_bytes"
+reinforcement = "append search_hit access events and reinforce backend frecency only for handles present in shaped results, never for more or other overflow"
 no_silent_empty = """
 An empty result set must say what was tried: stages run, scope searched, and a
 hint ('try broader terms or namespace=\"\"'). The predecessor failed silently

@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use memory_core::NoteType;
+use memory_core::{ContentHit, ContentMatch, NoteType};
 use serde::{Deserialize, Serialize};
 
 /// Default `limit` for search results.
@@ -52,8 +52,8 @@ pub struct MergedHit {
     pub match_score: f32,
     /// Stages that contributed.
     pub stages: Vec<MatchStage>,
-    /// Best snippet (prefer content over empty).
-    pub snippet: String,
+    /// Best content hit, retaining exact field provenance.
+    pub content: Option<ContentHit>,
     /// Compact why fragments before final join.
     pub why_parts: Vec<String>,
 }
@@ -118,8 +118,8 @@ pub struct BudgetedSearch {
 /// Merge path and content hits; dedupe by logical path; prefer active over archived.
 pub fn merge_hits(
     file_hits: &[(PathBuf, f32)],
-    plain_hits: &[(PathBuf, f32, String)],
-    fuzzy_hits: &[(PathBuf, f32, String)],
+    plain_hits: &[ContentHit],
+    fuzzy_hits: &[ContentHit],
 ) -> Vec<MergedHit> {
     let mut map: HashMap<PathBuf, MergedHit> = HashMap::new();
 
@@ -129,28 +129,28 @@ pub fn merge_hits(
             path.clone(),
             *score,
             MatchStage::FindFiles,
-            String::new(),
+            None,
             why_from_path(path),
         );
     }
-    for (path, score, snippet) in plain_hits {
+    for hit in plain_hits {
         upsert(
             &mut map,
-            path.clone(),
-            *score,
+            hit.path.clone(),
+            hit.score,
             MatchStage::GrepPlain,
-            snippet.clone(),
-            why_from_snippet(snippet),
+            Some(hit.clone()),
+            String::new(),
         );
     }
-    for (path, score, snippet) in fuzzy_hits {
+    for hit in fuzzy_hits {
         upsert(
             &mut map,
-            path.clone(),
-            *score,
+            hit.path.clone(),
+            hit.score,
             MatchStage::GrepFuzzy,
-            snippet.clone(),
-            why_from_snippet(snippet),
+            Some(hit.clone()),
+            String::new(),
         );
     }
 
@@ -169,7 +169,7 @@ fn upsert(
     path: PathBuf,
     score: f32,
     stage: MatchStage,
-    snippet: String,
+    content: Option<ContentHit>,
     why: String,
 ) {
     use std::collections::hash_map::Entry;
@@ -187,7 +187,7 @@ fn upsert(
                     path,
                     match_score: score,
                     stages: vec![stage],
-                    snippet,
+                    content,
                     why_parts: if why.is_empty() { vec![] } else { vec![why] },
                 };
                 return;
@@ -210,11 +210,14 @@ fn upsert(
                     hit.match_score += BOTH_STAGES_BONUS;
                 }
             }
-            if hit.snippet.is_empty() && !snippet.is_empty() {
-                hit.snippet = snippet;
-            } else if snippet.len() > hit.snippet.len() && !snippet.is_empty() {
-                // Prefer richer snippet
-                hit.snippet = snippet;
+            if let Some(content) = content {
+                let replace = hit
+                    .content
+                    .as_ref()
+                    .is_none_or(|current| content.snippet.len() > current.snippet.len());
+                if replace {
+                    hit.content = Some(content);
+                }
             }
             if !why.is_empty() && !hit.why_parts.iter().any(|p| p == &why) {
                 hit.why_parts.push(why);
@@ -229,7 +232,7 @@ fn upsert(
                 path,
                 match_score: score,
                 stages: vec![stage],
-                snippet,
+                content,
                 why_parts,
             });
         }
@@ -249,31 +252,14 @@ fn why_from_path(path: &Path) -> String {
     format!("path:{name}")
 }
 
-fn why_from_snippet(snippet: &str) -> String {
-    let lower = snippet.to_ascii_lowercase();
-    if lower.contains("aliases:") || lower.trim_start().starts_with("aliases") {
-        // Pull a short token after aliases if present
-        if let Some(rest) = snippet.split(':').nth(1) {
-            let token = rest
-                .trim()
-                .trim_start_matches('[')
-                .split([',', ']', '\n'])
-                .next()
-                .unwrap_or("")
-                .trim();
-            if !token.is_empty() {
-                return format!("alias:{token}");
-            }
-        }
-        return "alias".into();
+fn why_from_content(matched: &ContentMatch) -> String {
+    match matched {
+        ContentMatch::Title => "title".into(),
+        ContentMatch::Alias(alias) if alias.is_empty() => "alias".into(),
+        ContentMatch::Alias(alias) => format!("alias:{alias}"),
+        ContentMatch::Tags => "tags".into(),
+        ContentMatch::Body => "content".into(),
     }
-    if lower.contains("title:") {
-        return "title".into();
-    }
-    if lower.contains("tags:") {
-        return "tags".into();
-    }
-    "content".into()
 }
 
 /// Static type boosts (spec 03).
@@ -321,7 +307,11 @@ pub fn rank_hits(merged: Vec<MergedHit>, meta: &HashMap<PathBuf, NoteMeta>) -> V
             let mult = type_boost(note_type) * frecency_multiplier(read_count, search_hit_count);
             let score = m.match_score * mult;
 
-            let mut why = m.why_parts.join(" +");
+            let mut why_parts = m.why_parts;
+            if let Some(content) = &m.content {
+                why_parts.push(why_from_content(&content.matched));
+            }
+            let mut why = why_parts.join(" +");
             if why.is_empty() {
                 why = m
                     .stages
@@ -336,11 +326,10 @@ pub fn rank_hits(merged: Vec<MergedHit>, meta: &HashMap<PathBuf, NoteMeta>) -> V
                 ));
             }
 
-            let snippet = if m.snippet.is_empty() {
-                title.clone()
-            } else {
-                m.snippet
-            };
+            let snippet = m
+                .content
+                .map(|content| content.snippet)
+                .unwrap_or_else(|| title.clone());
 
             RankedHit {
                 path: m.path,
@@ -444,9 +433,11 @@ pub fn apply_budget(
             why: hit.why.clone(),
             score: hit.score,
         };
-        let size = estimate_bytes(&candidate);
+        let size = serde_json::to_vec(&candidate)
+            .expect("SearchHit serialization cannot fail")
+            .len();
 
-        if !results.is_empty() && used + size > budget_bytes {
+        if used.saturating_add(size) > budget_bytes {
             more.push(MoreHit {
                 handle: hit.handle,
                 title: hit.title,
@@ -467,11 +458,6 @@ pub fn apply_budget(
     }
 }
 
-fn estimate_bytes(hit: &SearchHit) -> usize {
-    // Approximate JSON-ish payload size for budgeting.
-    hit.handle.len() + hit.title.len() + hit.snippet.len() + hit.why.len() + 32
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -480,13 +466,22 @@ mod tests {
     #[test]
     fn merge_dedupes_and_applies_both_stages_bonus() {
         let file = vec![(PathBuf::from("proj/a.md"), 1.0)];
-        let plain = vec![(PathBuf::from("proj/a.md"), 0.8, "aliases: [ship]".into())];
+        let plain = vec![ContentHit {
+            path: PathBuf::from("proj/a.md"),
+            snippet: "aliases: [ship]".into(),
+            line: 3,
+            score: 0.8,
+            matched: ContentMatch::Alias("ship".into()),
+        }];
         let merged = merge_hits(&file, &plain, &[]);
         assert_eq!(merged.len(), 1);
         assert!((merged[0].match_score - (1.0 + BOTH_STAGES_BONUS)).abs() < 1e-5);
         assert!(merged[0].stages.contains(&MatchStage::FindFiles));
         assert!(merged[0].stages.contains(&MatchStage::GrepPlain));
-        assert!(merged[0].why_parts.iter().any(|w| w.starts_with("alias:")));
+        assert_eq!(
+            merged[0].content.as_ref().unwrap().matched,
+            ContentMatch::Alias("ship".into())
+        );
     }
 
     #[test]
@@ -509,14 +504,14 @@ mod tests {
                 path: PathBuf::from("low.md"),
                 match_score: 1.0,
                 stages: vec![MatchStage::FindFiles],
-                snippet: "x".into(),
+                content: None,
                 why_parts: vec!["path:low".into()],
             },
             MergedHit {
                 path: PathBuf::from("high.md"),
                 match_score: 1.0,
                 stages: vec![MatchStage::FindFiles],
-                snippet: "y".into(),
+                content: None,
                 why_parts: vec!["path:high".into()],
             },
         ];
@@ -599,6 +594,153 @@ mod tests {
     }
 
     #[test]
+    fn explicit_zero_budget_returns_only_more() {
+        let ranked = vec![RankedHit {
+            path: PathBuf::from("a.md"),
+            score: 1.0,
+            snippet: "short".into(),
+            why: "content".into(),
+            title: "A".into(),
+            handle: "a".into(),
+        }];
+
+        let out = apply_budget(ranked, 8, 0, &[MatchStage::GrepPlain], "");
+
+        assert!(out.results.is_empty());
+        assert_eq!(out.more[0].handle, "a");
+    }
+
+    #[test]
+    fn oversized_first_hit_is_not_force_admitted() {
+        let hit = RankedHit {
+            path: PathBuf::from("large.md"),
+            score: 1.0,
+            snippet: "x".repeat(100),
+            why: "content".into(),
+            title: "Large".into(),
+            handle: "large".into(),
+        };
+        let candidate = SearchHit {
+            handle: hit.handle.clone(),
+            title: hit.title.clone(),
+            snippet: hit.snippet.clone(),
+            why: hit.why.clone(),
+            score: hit.score,
+        };
+        let budget = serde_json::to_vec(&candidate).unwrap().len() - 1;
+
+        let out = apply_budget(vec![hit], 8, budget, &[MatchStage::GrepPlain], "");
+
+        assert!(out.results.is_empty());
+        assert_eq!(out.more[0].handle, "large");
+    }
+
+    #[test]
+    fn fitting_hit_after_oversized_first_is_still_returned() {
+        let large = RankedHit {
+            path: PathBuf::from("large.md"),
+            score: 2.0,
+            snippet: "x".repeat(500),
+            why: "content".into(),
+            title: "Large".into(),
+            handle: "large".into(),
+        };
+        let small = RankedHit {
+            path: PathBuf::from("small.md"),
+            score: 1.0,
+            snippet: "small".into(),
+            why: "content".into(),
+            title: "Small".into(),
+            handle: "small".into(),
+        };
+        let candidate = SearchHit {
+            handle: small.handle.clone(),
+            title: small.title.clone(),
+            snippet: small.snippet.clone(),
+            why: small.why.clone(),
+            score: small.score,
+        };
+        let budget = serde_json::to_vec(&candidate).unwrap().len();
+
+        let out = apply_budget(vec![large, small], 8, budget, &[MatchStage::GrepPlain], "");
+
+        assert_eq!(out.results[0].handle, "small");
+        assert_eq!(out.more[0].handle, "large");
+    }
+
+    #[test]
+    fn budget_counts_unicode_and_json_escaping_exactly() {
+        let hit = RankedHit {
+            path: PathBuf::from("unicode.md"),
+            score: 1.0,
+            snippet: "🚚\n\"quoted\"\\path\n\"quoted\"\\path".into(),
+            why: "alias:café".into(),
+            title: "Café 🚛".into(),
+            handle: "unicode".into(),
+        };
+        let candidate = SearchHit {
+            handle: hit.handle.clone(),
+            title: hit.title.clone(),
+            snippet: hit.snippet.clone(),
+            why: hit.why.clone(),
+            score: hit.score,
+        };
+        let exact = serde_json::to_vec(&candidate).unwrap().len();
+
+        let fits = apply_budget(vec![hit.clone()], 8, exact, &[MatchStage::GrepPlain], "");
+        let spills = apply_budget(vec![hit], 8, exact - 1, &[MatchStage::GrepPlain], "");
+
+        assert_eq!(fits.results.len(), 1);
+        assert!(spills.results.is_empty());
+        assert_eq!(spills.more[0].handle, "unicode");
+    }
+
+    #[test]
+    fn budget_is_clamped_to_max() {
+        let hit = RankedHit {
+            path: PathBuf::from("too-large.md"),
+            score: 1.0,
+            snippet: "x".repeat(BUDGET_BYTES_MAX),
+            why: "content".into(),
+            title: "Too Large".into(),
+            handle: "too-large".into(),
+        };
+
+        let out = apply_budget(vec![hit], 8, usize::MAX, &[MatchStage::GrepPlain], "");
+
+        assert!(out.results.is_empty());
+        assert_eq!(out.more[0].handle, "too-large");
+    }
+
+    #[test]
+    fn long_overflow_remains_bare_and_outside_snippet_budget() {
+        let ranked: Vec<RankedHit> = (0..257)
+            .map(|i| RankedHit {
+                path: PathBuf::from(format!("{i}.md")),
+                score: 1.0,
+                snippet: "snippet".into(),
+                why: "content".into(),
+                title: format!("Title {i} {}", "x".repeat(100)),
+                handle: format!("h{i}"),
+            })
+            .collect();
+        let first = SearchHit {
+            handle: ranked[0].handle.clone(),
+            title: ranked[0].title.clone(),
+            snippet: ranked[0].snippet.clone(),
+            why: ranked[0].why.clone(),
+            score: ranked[0].score,
+        };
+        let budget = serde_json::to_vec(&first).unwrap().len();
+
+        let out = apply_budget(ranked, 1, budget, &[MatchStage::GrepPlain], "");
+
+        assert_eq!(out.results.len(), 1);
+        assert_eq!(out.more.len(), 256);
+        assert_eq!(out.more.last().unwrap().handle, "h256");
+    }
+
+    #[test]
     fn empty_results_include_hint_and_stages() {
         let out = apply_budget(
             vec![],
@@ -640,7 +782,7 @@ mod tests {
             path: path.clone(),
             match_score: 1.0,
             stages: vec![MatchStage::FindFiles],
-            snippet: "hit".into(),
+            content: None,
             why_parts: vec!["path:note".into()],
         }];
         let meta = HashMap::from([(

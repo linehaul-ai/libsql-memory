@@ -1,5 +1,6 @@
 //! [`FffRetriever`]: fff-search FilePicker behind [`memory_core::Retriever`].
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
@@ -13,7 +14,8 @@ use fff_search::{
     SharedFilePicker, SharedFrecency, SharedQueryTracker,
 };
 use memory_core::{
-    ContentHit, Error, FileHit, GrepMode, IndexSnapshot, IndexState, Result, Retriever,
+    ContentHit, ContentMatch, Error, FileHit, GrepMode, IndexSnapshot, IndexState, Note, Result,
+    Retriever,
 };
 
 /// Default scan wait when opening or reindexing.
@@ -369,7 +371,9 @@ fn grep_in_picker(
     if let Some(scope_glob) = scope_glob.as_deref() {
         parsed.constraints.push(Constraint::Glob(scope_glob));
     }
+    let matched_query = parsed.grep_text();
     let mut hits = Vec::new();
+    let mut note_texts: HashMap<PathBuf, Option<String>> = HashMap::new();
     let mut file_offset = 0;
     loop {
         let results = picker.grep(
@@ -390,11 +394,23 @@ fn grep_in_picker(
             };
             let logical = PathBuf::from(file.relative_path(picker));
             if keep_path(&logical, scope) {
+                let text = note_texts.entry(logical.clone()).or_insert_with(|| {
+                    std::fs::read_to_string(file.absolute_path(picker, picker.base_path())).ok()
+                });
                 page.push(ContentHit {
                     path: prefix.map_or(logical.clone(), |p| p.join(&logical)),
                     snippet: m.line_content.trim().to_string(),
                     line: m.line_number as u32,
                     score: m.fuzzy_score.map(|s| s as f32).unwrap_or(1.0),
+                    matched: text.as_deref().map_or(ContentMatch::Body, |text| {
+                        classify_content_match(
+                            text,
+                            m.line_number,
+                            &m.line_content,
+                            &m.match_byte_offsets,
+                            &matched_query,
+                        )
+                    }),
                 });
             }
         }
@@ -409,6 +425,84 @@ fn grep_in_picker(
         }
         file_offset = results.next_file_offset;
     }
+}
+
+fn classify_content_match(
+    text: &str,
+    line_number: u64,
+    line: &str,
+    match_offsets: &[(u32, u32)],
+    query: &str,
+) -> ContentMatch {
+    match frontmatter_field(text, line_number) {
+        Some("title") => ContentMatch::Title,
+        Some("aliases") => Note::parse_lenient(text)
+            .ok()
+            .and_then(|note| matched_alias(&note.frontmatter.aliases, line, match_offsets, query))
+            .map(ContentMatch::Alias)
+            .unwrap_or_else(|| ContentMatch::Alias(String::new())),
+        Some("tags") => ContentMatch::Tags,
+        _ => ContentMatch::Body,
+    }
+}
+
+fn frontmatter_field(text: &str, target_line: u64) -> Option<&str> {
+    let mut in_frontmatter = false;
+    let mut field = None;
+    for (index, line) in text.lines().enumerate() {
+        let line_number = index as u64 + 1;
+        if line_number == 1 && line.trim() == "---" {
+            in_frontmatter = true;
+            continue;
+        }
+        if in_frontmatter && line.trim() == "---" {
+            return None;
+        }
+        if !in_frontmatter {
+            return None;
+        }
+        if !line.starts_with([' ', '\t', '-']) {
+            if let Some((key, _)) = line.split_once(':') {
+                field = Some(key.trim());
+            }
+        }
+        if line_number == target_line {
+            return field;
+        }
+    }
+    None
+}
+
+fn matched_alias(
+    aliases: &[String],
+    line: &str,
+    match_offsets: &[(u32, u32)],
+    query: &str,
+) -> Option<String> {
+    let matched_span = match_offsets
+        .iter()
+        .map(|(start, end)| (*start as usize, *end as usize))
+        .reduce(|(start, end), (next_start, next_end)| (start.min(next_start), end.max(next_end)));
+    if let Some((match_start, match_end)) = matched_span {
+        if let Some(alias) = aliases.iter().find(|alias| {
+            line.match_indices(alias.as_str()).any(|(start, value)| {
+                let end = start + value.len();
+                start < match_end && match_start < end
+            })
+        }) {
+            return Some(alias.clone());
+        }
+    }
+
+    let query = query.to_lowercase();
+    aliases
+        .iter()
+        .find(|alias| {
+            let alias_lower = alias.to_lowercase();
+            alias_lower.contains(&query) || query.contains(&alias_lower)
+        })
+        .or_else(|| aliases.iter().find(|alias| line.contains(alias.as_str())))
+        .cloned()
 }
 
 fn normalize_file_hits(hits: &mut [FileHit]) {
