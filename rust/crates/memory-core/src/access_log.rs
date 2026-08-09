@@ -405,26 +405,13 @@ impl AccessLog {
         self.write_counters_unlocked(&counters)?;
 
         // Counters go first: their cutoff makes a stale source log safe after interruption.
-        let dir = self.path.parent().unwrap_or_else(|| Path::new("."));
-        let mut tmp = tempfile::Builder::new()
-            .prefix(".access-")
-            .suffix(".tmp")
-            .tempfile_in(dir)
-            .map_err(|e| Error::io(dir, e))?;
+        let mut source = Vec::new();
         for ev in &kept {
-            let line = serde_json::to_string(ev)
+            serde_json::to_writer(&mut source, ev)
                 .map_err(|e| Error::validation("access_log", format!("serialize: {e}")))?;
-            writeln!(tmp, "{line}").map_err(|e| Error::io(tmp.path(), e))?;
+            source.push(b'\n');
         }
-        tmp.as_file()
-            .sync_all()
-            .map_err(|e| Error::io(tmp.path(), e))?;
-        tmp.persist(&self.path).map_err(|e| {
-            Error::io(
-                &self.path,
-                std::io::Error::new(e.error.kind(), e.error.to_string()),
-            )
-        })?;
+        crate::store::atomic_write(&self.path, &source)?;
 
         Ok(CompactionStats {
             events_kept: kept.len(),
