@@ -16,7 +16,7 @@ stages = [
   "6. Shape output under the token budget (see [output]).",
 ]
 scope = "namespace argument narrows to a subtree; absent = whole root; .archive/ excluded unless include_archived = true"
-scope_application = "namespace text remains literal: page raw fff results and apply the root-relative prefix filter until the scoped result window is full or backend results are exhausted; archived search uses a short-lived synchronous picker rooted at .archive/ and restores the .archive/ storage prefix only on returned paths"
+scope_application = "namespace constraints use a root-anchored, literal-escaped namespace/** glob inside fff before pagination for both find and grep; returned paths are post-filtered at the literal root-prefix boundary as a defense; archived search uses a short-lived synchronous picker rooted at .archive/ and restores the .archive/ storage prefix only on returned paths"
 archive_collisions = "an active note shadows the archived note with the same logical namespace/slug even when only archived content matched; if both storage paths are returned, they dedupe to the active note"
 
 [ranking]

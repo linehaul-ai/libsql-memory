@@ -9,8 +9,8 @@ use fff_search::frecency::FrecencyTracker;
 use fff_search::grep::{parse_grep_query, GrepMode as FffGrepMode, GrepSearchOptions};
 use fff_search::query_tracker::QueryTracker;
 use fff_search::{
-    FFFMode, FilePickerOptions, FuzzySearchOptions, PaginationArgs, QueryParser, SharedFilePicker,
-    SharedFrecency, SharedQueryTracker,
+    Constraint, FFFMode, FilePickerOptions, FuzzySearchOptions, PaginationArgs, QueryParser,
+    SharedFilePicker, SharedFrecency, SharedQueryTracker,
 };
 use memory_core::{
     ContentHit, Error, FileHit, GrepMode, IndexSnapshot, IndexState, Result, Retriever,
@@ -312,7 +312,11 @@ fn find_in_picker(
     scope: Option<&str>,
     prefix: Option<&Path>,
 ) -> Vec<FileHit> {
-    let parsed = QueryParser::default().parse(query);
+    let scope_glob = scope.filter(|s| !s.is_empty()).map(namespace_glob);
+    let mut parsed = QueryParser::default().parse(query);
+    if let Some(scope_glob) = scope_glob.as_deref() {
+        parsed.constraints.push(Constraint::Glob(scope_glob));
+    }
     let mut hits = Vec::new();
     let mut offset = 0;
     loop {
@@ -360,7 +364,11 @@ fn grep_in_picker(
     scope: Option<&str>,
     prefix: Option<&Path>,
 ) -> Vec<ContentHit> {
-    let parsed = parse_grep_query(query);
+    let scope_glob = scope.filter(|s| !s.is_empty()).map(namespace_glob);
+    let mut parsed = parse_grep_query(query);
+    if let Some(scope_glob) = scope_glob.as_deref() {
+        parsed.constraints.push(Constraint::Glob(scope_glob));
+    }
     let mut hits = Vec::new();
     let mut file_offset = 0;
     loop {
@@ -433,6 +441,22 @@ fn normalize_score(score: f32, min: f32, max: f32) -> f32 {
     }
 }
 
+fn namespace_glob(scope: &str) -> String {
+    let mut escaped = String::with_capacity(scope.len() + 3);
+    for c in scope.chars() {
+        match c {
+            '?' | '*' | '[' | ']' | '{' | '}' => {
+                escaped.push('[');
+                escaped.push(c);
+                escaped.push(']');
+            }
+            _ => escaped.push(c),
+        }
+    }
+    escaped.push_str("/**");
+    escaped
+}
+
 /// Drop reserved paths and enforce namespace scope at a segment boundary.
 fn keep_path(path: &Path, scope: Option<&str>) -> bool {
     let s = path.to_string_lossy();
@@ -455,6 +479,14 @@ fn keep_path(path: &Path, scope: Option<&str>) -> bool {
 #[cfg(test)]
 mod path_filter_tests {
     use super::*;
+
+    #[test]
+    fn namespace_glob_escapes_all_metacharacters() {
+        assert_eq!(
+            namespace_glob("team?*[x]{y}"),
+            "team[?][*][[]x[]][{]y[}]/**"
+        );
+    }
 
     #[test]
     fn drops_archive_and_index() {
