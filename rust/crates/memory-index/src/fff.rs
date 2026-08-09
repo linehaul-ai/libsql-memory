@@ -102,9 +102,34 @@ impl FffRetriever {
         })
     }
 
+    /// Remove only the disposable fff databases, then open and scan a fresh index.
+    ///
+    /// Unlike instance [`Retriever::reindex`], this recovers when the old databases
+    /// are corrupt enough that [`Self::open`] cannot succeed. Lifecycle files such as
+    /// `.index/access.jsonl` are preserved.
+    pub fn rebuild(root: impl AsRef<Path>) -> Result<Self> {
+        let root = root.as_ref();
+        remove_disposable_path(&root.join(".index/frecency"))?;
+        remove_disposable_path(&root.join(".index/queries"))?;
+        Self::open(root)
+    }
+
     /// Absolute path of the memory root being indexed.
     pub fn root(&self) -> &Path {
         &self.root
+    }
+}
+
+fn remove_disposable_path(path: &Path) -> Result<()> {
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(Error::io(path, error)),
+    };
+    if metadata.is_dir() {
+        std::fs::remove_dir_all(path).map_err(|error| Error::io(path, error))
+    } else {
+        std::fs::remove_file(path).map_err(|error| Error::io(path, error))
     }
 }
 

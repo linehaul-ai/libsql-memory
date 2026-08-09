@@ -67,7 +67,15 @@ args = ["namespace: string (optional)"]
 returns = "{ total_notes, by_namespace, by_type, disk_bytes, index: {state, files_indexed, last_scan_ms}, decay: {never_accessed_30d, expiring_soon} }"
 
 [cli]
-note = "Same binary, subcommands mirror the tools 1:1 plus lifecycle commands: fff-memory serve|store|search|read|forget|stats|doctor|reindex. CLI exists for humans and hooks; serve is what .mcp.json launches."
+commands = "exactly: fff-memory serve|store|search|read|forget|stats|doctor|reindex"
+global_args = "--root PATH, --config PATH, --project [PATH]; accepted before or after subcommands; --project defaults to . (place the bare no-PATH form after the subcommand to avoid optional-value ambiguity) and conflicts only with explicit --root"
+store = "required --title, --body, --type, and at least two repeated --alias; optional --namespace (default default), repeated --tag, --expires YYYY-MM-DD, --mode append|replace"
+search = "required positional QUERY; optional --namespace, --limit, --budget, --include-archived"
+read_forget_stats = "read HANDLE; forget HANDLE [--hard]; stats [--namespace]"
+output = "store/search/read/forget/stats each emit exactly one JSON object plus newline on stdout; diagnostics go only to stderr; doctor/reindex remain human-readable"
+implementation = "one async clap entry point resolves and creates the root, then reuses MemoryService, MemoryServer, and serve_stdio; read/forget do not start the index"
+retrieval_failure = "serve/store/search/stats attempt FffRetriever startup; failure emits one stderr diagnostic and continues without retrieval. Store remains independent; search returns no results, no falsely claimed stages, and actionable index-unavailable guidance; stats reports unavailable."
+stdio_evidence = "a spawned binary test proves initialize, initialized, tools/list, store, watcher-polled search, and read with bounded waits, graceful stdin EOF, kill fallback, and JSON-only stdout"
 
 [errors]
 style = "structured, actionable, never silent; every error names the failing input and a fix"

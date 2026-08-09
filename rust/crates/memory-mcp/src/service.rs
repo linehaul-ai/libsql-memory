@@ -226,25 +226,32 @@ impl MemoryService {
         let scope = scope_owned.as_deref();
         let scope_label = scope.unwrap_or("").to_string();
 
+        let Some(retriever) = self.retriever.as_ref() else {
+            return Ok(index_unavailable_response(
+                &scope_label,
+                IndexState::Unavailable,
+            ));
+        };
+        let index_state = retriever.index_state();
+        if index_state != IndexState::Ready {
+            return Ok(index_unavailable_response(&scope_label, index_state));
+        }
+
         let mut stages = Vec::new();
         let mut file_raw: Vec<(PathBuf, f32)> = Vec::new();
         let mut plain_raw = Vec::new();
         let mut fuzzy_raw = Vec::new();
 
-        let Some(retriever) = self.retriever.as_ref() else {
-            stages.push(MatchStage::FindFiles);
-            stages.push(MatchStage::GrepPlain);
-            let budgeted =
-                apply_budget(vec![], opts.limit, opts.budget_bytes, &stages, &scope_label);
-            return Ok(budgeted.into());
-        };
-
         if query.is_empty() {
-            stages.push(MatchStage::FindFiles);
-            stages.push(MatchStage::GrepPlain);
-            let budgeted =
-                apply_budget(vec![], opts.limit, opts.budget_bytes, &stages, &scope_label);
-            return Ok(budgeted.into());
+            return Ok(SearchResponse {
+                results: Vec::new(),
+                more: Vec::new(),
+                stages_run: Vec::new(),
+                scope: scope_label,
+                empty_hint: Some(
+                    "no search stages ran; supply a non-empty query, then try broader terms".into(),
+                ),
+            });
         }
 
         stages.push(MatchStage::FindFiles);
@@ -483,6 +490,23 @@ impl MemoryService {
             search_hit_count_30d: access_counts.search_hit as u32,
             handle,
         })
+    }
+}
+
+fn index_unavailable_response(scope: &str, state: IndexState) -> SearchResponse {
+    let state = match state {
+        IndexState::Cold => "cold",
+        IndexState::Unavailable => "unavailable",
+        IndexState::Ready => "ready",
+    };
+    SearchResponse {
+        results: Vec::new(),
+        more: Vec::new(),
+        stages_run: Vec::new(),
+        scope: scope.to_string(),
+        empty_hint: Some(format!(
+            "search index {state}; no search stages ran; retry after startup or run `fff-memory reindex` and check index path permissions"
+        )),
     }
 }
 
@@ -872,6 +896,47 @@ mod tests {
         assert!(resp.results.is_empty());
         let hint = resp.empty_hint.expect("hint");
         assert!(hint.contains("find_files") || hint.contains("grep"));
+    }
+
+    #[test]
+    fn unavailable_or_cold_index_reports_no_unexecuted_stages() {
+        let dir = tempdir().unwrap();
+        for (retriever, state) in [
+            (None, "unavailable"),
+            (
+                Some(Arc::new(FakeRetriever {
+                    state: IndexState::Cold,
+                    ..Default::default()
+                }) as Arc<dyn Retriever>),
+                "cold",
+            ),
+        ] {
+            let response = MemoryService::new(dir.path(), retriever)
+                .search(SearchOptions {
+                    query: "anything".into(),
+                    ..Default::default()
+                })
+                .unwrap();
+            assert!(response.results.is_empty());
+            assert!(response.stages_run.is_empty());
+            let hint = response.empty_hint.unwrap();
+            assert!(hint.contains(state), "hint={hint}");
+            assert!(
+                hint.contains("reindex") || hint.contains("retry"),
+                "hint={hint}"
+            );
+        }
+    }
+
+    #[test]
+    fn empty_query_reports_no_unexecuted_stages() {
+        let dir = tempdir().unwrap();
+        let response = MemoryService::new(dir.path(), Some(Arc::new(FakeRetriever::ready())))
+            .search(SearchOptions::default())
+            .unwrap();
+        assert!(response.results.is_empty());
+        assert!(response.stages_run.is_empty());
+        assert!(response.empty_hint.unwrap().contains("non-empty query"));
     }
 
     #[test]

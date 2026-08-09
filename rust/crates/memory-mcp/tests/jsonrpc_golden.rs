@@ -269,7 +269,11 @@ async fn official_rmcp_wire_contract_matches_five_tool_goldens() {
     assert_eq!(search["results"], json!([]));
     assert_eq!(search["more"], json!([]));
     assert_eq!(search["scope"], "ops");
-    assert!(search["empty_hint"].as_str().unwrap().contains("broader"));
+    assert_eq!(search["stages_run"], json!([]));
+    assert!(search["empty_hint"]
+        .as_str()
+        .unwrap()
+        .contains("index unavailable"));
 
     let read = client
         .request(

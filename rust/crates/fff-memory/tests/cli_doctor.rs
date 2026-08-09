@@ -7,7 +7,15 @@ use tempfile::tempdir;
 
 fn bin() -> Command {
     let mut c = Command::new(env!("CARGO_BIN_EXE_fff-memory"));
-    c.env_remove("FFF_MEMORY_ROOT");
+    for key in [
+        "FFF_MEMORY_ROOT",
+        "FFF_MEMORY_CONFIG",
+        "XDG_CONFIG_HOME",
+        "XDG_DATA_HOME",
+        "HOME",
+    ] {
+        c.env_remove(key);
+    }
     c
 }
 
@@ -92,4 +100,33 @@ fn reindex_on_empty_root() {
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("reindex complete"), "stdout={stdout}");
+}
+
+#[test]
+fn reindex_recovers_unopenable_cache_and_preserves_access_log() {
+    let dir = tempdir().unwrap();
+    write_expired(dir.path());
+    let index = dir.path().join(".index");
+    fs::create_dir(&index).unwrap();
+    fs::write(index.join("frecency"), "not an LMDB directory").unwrap();
+    let access = "{\"ts\":\"2026-08-09T00:00:00Z\",\"handle\":\"proj/exp\",\"via\":\"read\"}\n";
+    fs::write(index.join("access.jsonl"), access).unwrap();
+
+    let out = bin()
+        .args(["reindex", "--root"])
+        .arg(dir.path())
+        .output()
+        .expect("run recovery reindex");
+    assert!(
+        out.status.success(),
+        "stderr={} stdout={}",
+        String::from_utf8_lossy(&out.stderr),
+        String::from_utf8_lossy(&out.stdout)
+    );
+    assert!(index.join("frecency").is_dir());
+    assert!(index.join("queries").is_dir());
+    assert_eq!(
+        fs::read_to_string(index.join("access.jsonl")).unwrap(),
+        access
+    );
 }

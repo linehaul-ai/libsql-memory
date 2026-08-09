@@ -3,7 +3,7 @@ name = "fff-memory"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "CLI for fff-memory: doctor, reindex, and lifecycle tools"
+description = "CLI and MCP server for fff-memory"
 repository.workspace = true
 
 [[bin]]
@@ -13,7 +13,12 @@ path = "src/main.rs"
 [dependencies]
 memory-core = { workspace = true }
 memory-index = { workspace = true }
+memory-mcp = { workspace = true }
 clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+time = { workspace = true }
+tokio = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

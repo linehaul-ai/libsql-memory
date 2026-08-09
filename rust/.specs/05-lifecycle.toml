@@ -51,3 +51,4 @@ failure_policy = "doctor validates one coherent access snapshot before decay dec
 [reindex]
 command = "fff-memory reindex"
 behavior = "destroy and reinitialize only .index/frecency and .index/queries, preserve .index/access.jsonl and other lifecycle state, then trigger and await a full live-index rescan"
+recovery = "the CLI removes those two disposable paths before opening fff, so reindex repairs databases corrupt enough to prevent normal startup without touching access.jsonl"

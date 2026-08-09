@@ -448,7 +448,12 @@ dependencies = [
  "clap",
  "memory-core",
  "memory-index",
+ "memory-mcp",
+ "serde",
+ "serde_json",
  "tempfile",
+ "time",
+ "tokio",
 ]
 
 [[package]]
