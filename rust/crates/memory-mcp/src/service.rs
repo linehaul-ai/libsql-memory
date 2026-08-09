@@ -392,7 +392,14 @@ impl MemoryService {
     /// Archive (default) or hard-delete a note.
     pub fn forget(&self, handle: &str, hard: bool) -> Result<ForgetOutcome> {
         let (ns, slug) = parse_handle(handle)?;
-        let abs = self.store.absolute_path(&ns, &slug);
+        let mut abs = self.store.absolute_path(&ns, &slug);
+        if hard && !abs.is_file() {
+            abs = self
+                .store
+                .root()
+                .join(".archive")
+                .join(MemoryStore::relative_path(&ns, &slug));
+        }
         if !abs.is_file() {
             return Err(Error::NotFound {
                 handle: MemoryStore::handle(&ns, &slug),
@@ -1558,6 +1565,50 @@ mod tests {
         let out = svc.forget("gone", true).unwrap();
         assert_eq!(out.action, ForgetAction::Deleted);
         assert!(!dir.path().join("gone.md").exists());
+    }
+
+    #[test]
+    fn forget_hard_deletes_archived_note_when_active_is_absent() {
+        let dir = tempdir().unwrap();
+        seed_note(
+            dir.path(),
+            ".archive/proj/gone.md",
+            "Archived Gone",
+            &["retired note", "old note"],
+            "archived body",
+        );
+        let svc = MemoryService::new(dir.path(), None);
+
+        let out = svc.forget("proj/gone", true).unwrap();
+
+        assert_eq!(out.action, ForgetAction::Deleted);
+        assert!(!dir.path().join(".archive/proj/gone.md").exists());
+    }
+
+    #[test]
+    fn forget_hard_prefers_active_note_over_same_handle_archive() {
+        let dir = tempdir().unwrap();
+        seed_note(
+            dir.path(),
+            "proj/gone.md",
+            "Active Gone",
+            &["current note", "live note"],
+            "active body",
+        );
+        seed_note(
+            dir.path(),
+            ".archive/proj/gone.md",
+            "Archived Gone",
+            &["retired note", "old note"],
+            "archived body",
+        );
+        let svc = MemoryService::new(dir.path(), None);
+
+        let out = svc.forget("proj/gone", true).unwrap();
+
+        assert_eq!(out.action, ForgetAction::Deleted);
+        assert!(!dir.path().join("proj/gone.md").exists());
+        assert!(dir.path().join(".archive/proj/gone.md").is_file());
     }
 
     #[test]

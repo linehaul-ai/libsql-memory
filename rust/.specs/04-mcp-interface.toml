@@ -56,7 +56,7 @@ name = "memory_forget"
 summary = "Archive (default) or hard-delete a note."
 args = [
   "handle: string (required)",
-  "hard: bool (default false) — false moves to .archive/, true removes the file",
+  "hard: bool (default false) — false moves the active note to .archive/; true removes the active note, falling back to its archived note only when active is absent",
 ]
 returns = "{ handle, action: archived|deleted }"
 
