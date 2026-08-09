@@ -14,8 +14,8 @@ use fff_search::{
     SharedFilePicker, SharedFrecency, SharedQueryTracker,
 };
 use memory_core::{
-    ContentHit, ContentMatch, Error, FileHit, GrepMode, IndexSnapshot, IndexState, Note, Result,
-    Retriever,
+    ensure_index_ignored, ContentHit, ContentMatch, Error, FileHit, GrepMode, IndexSnapshot,
+    IndexState, Note, Result, Retriever,
 };
 
 /// Default scan wait when opening or reindexing.
@@ -48,6 +48,7 @@ impl FffRetriever {
             .canonicalize()
             .map_err(|e| Error::io(root.as_ref().to_path_buf(), e))?;
 
+        ensure_index_ignored(&root)?;
         let index_dir = root.join(".index");
         std::fs::create_dir_all(index_dir.join("frecency"))
             .map_err(|e| Error::io(index_dir.join("frecency"), e))?;

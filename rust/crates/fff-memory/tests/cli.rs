@@ -399,6 +399,30 @@ fn project_selects_dot_memory_and_conflicts_only_with_explicit_root() {
 }
 
 #[test]
+fn project_memory_root_ignores_index_without_overwriting_existing_rules() {
+    let dir = tempdir().unwrap();
+    let project = dir.path().join("project");
+    let root = project.join(".memory");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join(".gitignore"), "keep-this-rule\n").unwrap();
+
+    for _ in 0..2 {
+        let out = bin()
+            .args(["stats", "--project"])
+            .arg(&project)
+            .output()
+            .unwrap();
+        assert_success(&out);
+    }
+
+    assert_eq!(
+        fs::read_to_string(root.join(".gitignore")).unwrap(),
+        "keep-this-rule\n/.index/\n"
+    );
+    assert!(root.join(".index").is_dir());
+}
+
+#[test]
 fn config_errors_name_the_path_and_the_fix() {
     let dir = tempdir().unwrap();
     let cases = [

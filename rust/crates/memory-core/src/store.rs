@@ -5,7 +5,7 @@
 //! - No hard dependency on the index: dedup is best-effort via [`Retriever`].
 //! - Disk writes are temp + fsync + rename in the target directory.
 
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -538,6 +538,45 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+/// Ensure the disposable index directory is ignored without replacing existing rules.
+pub fn ensure_index_ignored(root: &Path) -> Result<()> {
+    fs::create_dir_all(root).map_err(|e| Error::io(root, e))?;
+    let path = root.join(".gitignore");
+    let existing = match fs::symlink_metadata(&path) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+            return Err(Error::validation(
+                ".gitignore",
+                format!("{} must be a regular file", path.display()),
+            ));
+        }
+        Ok(_) => fs::read(&path).map_err(|e| Error::io(&path, e))?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(error) => return Err(Error::io(&path, error)),
+    };
+
+    if existing
+        .split(|byte| *byte == b'\n')
+        .any(|line| matches!(line, b"/.index/" | b".index/" | b"/.index" | b".index"))
+    {
+        return Ok(());
+    }
+
+    let mut addition = Vec::with_capacity(11);
+    if !existing.is_empty() && !existing.ends_with(b"\n") {
+        addition.push(b'\n');
+    }
+    addition.extend_from_slice(b"/.index/\n");
+
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .map_err(|e| Error::io(&path, e))?;
+    file.write_all(&addition).map_err(|e| Error::io(&path, e))?;
+    file.sync_all().map_err(|e| Error::io(&path, e))?;
     Ok(())
 }
 

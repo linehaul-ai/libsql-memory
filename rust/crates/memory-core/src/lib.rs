@@ -36,4 +36,6 @@ pub use retriever::{
     testing, ContentHit, ContentMatch, FileHit, GrepMode, IndexSnapshot, IndexState, Retriever,
 };
 pub use slugify::{slugify, validate_namespace, SLUG_MAX_LEN};
-pub use store::{MemoryStore, MergeMode, StoreAction, StoreInput, StoreOutcome};
+pub use store::{
+    ensure_index_ignored, MemoryStore, MergeMode, StoreAction, StoreInput, StoreOutcome,
+};

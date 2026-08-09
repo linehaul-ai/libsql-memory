@@ -461,6 +461,9 @@ impl AccessLog {
 
     fn lock(&self, exclusive: bool) -> Result<AccessLock> {
         let parent = self.lock_path.parent().unwrap_or_else(|| Path::new("."));
+        if let Some(root) = parent.parent() {
+            crate::store::ensure_index_ignored(root)?;
+        }
         fs::create_dir_all(parent).map_err(|e| Error::io(parent, e))?;
         let file = OpenOptions::new()
             .create(true)
@@ -506,6 +509,10 @@ mod tests {
         log.append("proj/a", AccessVia::Read).unwrap();
         log.append("proj/a", AccessVia::SearchHit).unwrap();
         log.append("proj/b", AccessVia::Read).unwrap();
+        assert_eq!(
+            fs::read_to_string(dir.path().join(".gitignore")).unwrap(),
+            "/.index/\n"
+        );
         assert_eq!(log.count_recent("proj/a", 30), 2);
         assert_eq!(log.count_recent("proj/b", 30), 1);
         assert_eq!(log.count_recent("missing", 30), 0);

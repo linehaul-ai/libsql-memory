@@ -49,7 +49,7 @@ watcher = "external edits (humans, other sessions, git pulls) are indexed automa
 [git]
 stance = "the memory root is expected (not required) to be a git repo; git is the history, review, and sync layer"
 tooling = "we never shell out to git ourselves in v1; the user commits. doctor may print a suggested commit message."
-gitignore = ".index/ is always ignored"
+gitignore = "Before any retriever or lifecycle access creates .index/, the memory root's .gitignore is ensured to contain /.index/; existing rules are preserved and repeated opens do not duplicate the rule."
 
 [root_resolution]
 project = "--project [PATH] selects PATH/.memory (PATH defaults to .) and overrides every root source; it conflicts only with an explicitly supplied --root"
