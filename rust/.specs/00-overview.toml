@@ -36,9 +36,9 @@ list = [
 
 [architecture]
 headline = """
-One Rust binary that is both an MCP stdio server and a CLI. It embeds the fff
-crates (fff-search, fff-grep, fff-query-parser) directly as library
-dependencies — no sidecar fff-mcp process, no IPC hop. Memory notes are
+One Rust binary that is both an MCP stdio server and a CLI. It embeds the pinned
+fff-search crate directly; grep and query-parser APIs are re-exported by it —
+no sidecar fff-mcp process, no IPC hop. Memory notes are
 markdown files with YAML frontmatter in a watched directory tree.
 """
 retrieval_backend = "fff crates behind a small Retriever trait (see 06-workspace.toml), keeping the backend swappable and insulating against upstream API churn."
