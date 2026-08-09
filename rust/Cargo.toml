@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/memory-core"]
+members = ["crates/memory-core", "crates/memory-index"]
 
 [workspace.package]
 version = "0.1.0"
@@ -9,6 +9,8 @@ license = "MIT"
 repository = "https://github.com/fakebizprez/libsql-memory"
 
 [workspace.dependencies]
+memory-core = { path = "crates/memory-core" }
+fff-search = "=0.10.3"
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
 thiserror = "2"
