@@ -199,7 +199,7 @@ fn spawned_stdio_round_trip_store_search_read() {
             "tools/call",
             json!({
                 "name": "memory_search",
-                "arguments": { "query": "stdio integration" }
+                "arguments": { "query": "spawned server round trip" }
             }),
         );
         let results = structured(&searched)["results"].as_array().unwrap();

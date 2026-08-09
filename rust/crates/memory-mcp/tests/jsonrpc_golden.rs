@@ -1,5 +1,7 @@
 use std::{collections::BTreeSet, time::Duration};
 
+use memory_core::testing::FakeRetriever;
+use memory_core::{ContentHit, ContentMatch, IndexState};
 use memory_mcp::MemoryServer;
 use rmcp::ServiceExt;
 use serde_json::{json, Value};
@@ -130,6 +132,12 @@ fn tool_error(response: &Value) -> &str {
     content[0]["text"].as_str().unwrap()
 }
 
+fn text_content(response: &Value) -> &str {
+    response["result"]["content"][0]["text"]
+        .as_str()
+        .expect("tool response has text content")
+}
+
 fn assert_keys(value: &Value, expected: &[&str]) {
     let actual: BTreeSet<_> = value
         .as_object()
@@ -257,7 +265,7 @@ async fn official_rmcp_wire_contract_matches_five_tool_goldens() {
             "tools/call",
             json!({
                 "name": "memory_search",
-                "arguments": { "query": "deploy", "namespace": "ops" }
+                "arguments": { "query": "deployment policy decision", "namespace": "ops" }
             }),
         )
         .await;
@@ -372,6 +380,73 @@ async fn official_rmcp_wire_contract_matches_five_tool_goldens() {
         structured(&forgotten),
         &json!({ "action": "archived", "handle": "ops/deploy-policy" })
     );
+
+    drop(client);
+    tokio::time::timeout(Duration::from_secs(5), server_task)
+        .await
+        .expect("server stopped after transport EOF")
+        .unwrap();
+}
+
+#[tokio::test]
+async fn search_matches_are_plain_hook_context_and_keep_structured_content() {
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("ops")).unwrap();
+    std::fs::write(
+        dir.path().join("ops/deploy-policy.md"),
+        "---\ntitle: Deploy Policy\naliases: [release process, deployment rules]\ntype: decision\ncreated: 2026-08-09\nupdated: 2026-08-09\n---\nPrefer blue-green releases.\n",
+    )
+    .unwrap();
+    let retriever = FakeRetriever {
+        state: IndexState::Ready,
+        contents: std::sync::Mutex::new(vec![ContentHit {
+            path: "ops/deploy-policy.md".into(),
+            snippet: "Prefer blue-green releases.".into(),
+            line: 8,
+            score: 1.0,
+            matched: ContentMatch::Body,
+        }]),
+        ..FakeRetriever::ready()
+    };
+    let (server_io, client_io) = tokio::io::duplex(64 * 1024);
+    let server = MemoryServer::open(dir.path(), Some(std::sync::Arc::new(retriever)));
+    let server_task = tokio::spawn(async move {
+        let running = server.serve(server_io).await.expect("rmcp initialize");
+        running.waiting().await.expect("rmcp server loop");
+    });
+    let mut client = RawClient::new(client_io);
+    client
+        .request(
+            "initialize",
+            json!({
+                "protocolVersion": "2025-11-25",
+                "capabilities": {},
+                "clientInfo": { "name": "hook-context-test", "version": "1" }
+            }),
+        )
+        .await;
+    client.notify("notifications/initialized").await;
+
+    let searched = client
+        .request(
+            "tools/call",
+            json!({
+                "name": "memory_search",
+                "arguments": { "query": "Prefer blue-green releases.", "namespace": "ops" }
+            }),
+        )
+        .await;
+
+    assert_eq!(
+        searched["result"]["structuredContent"]["results"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    let text = text_content(&searched);
+    assert!(text.starts_with("Memory context:\n"), "text={text:?}");
+    assert!(serde_json::from_str::<Value>(text).is_err());
 
     drop(client);
     tokio::time::timeout(Duration::from_secs(5), server_task)

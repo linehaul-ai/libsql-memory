@@ -5,8 +5,11 @@ use std::sync::Arc;
 
 use memory_core::{MergeMode, NoteType, Retriever};
 use rmcp::{
-    handler::server::{router::tool::ToolRouter, wrapper::Parameters},
-    model::{Implementation, ServerCapabilities, ServerInfo},
+    handler::server::{router::tool::ToolRouter, tool::IntoCallToolResult, wrapper::Parameters},
+    model::{
+        CallToolResponse, CallToolResult, ContentBlock, Implementation, ServerCapabilities,
+        ServerInfo,
+    },
     schemars::JsonSchema,
     tool, tool_handler, tool_router, ErrorData as McpError, ServerHandler, ServiceExt,
 };
@@ -14,6 +17,25 @@ use serde::{Deserialize, Serialize};
 use time::Date;
 
 use crate::service::{store_action_str, ForgetAction, MemoryService, SearchOptions, StoreRequest};
+
+struct HookContextJson(serde_json::Value);
+
+impl IntoCallToolResult for HookContextJson {
+    fn into_call_tool_result(self) -> Result<CallToolResponse, McpError> {
+        let has_matches = self.0["results"]
+            .as_array()
+            .is_some_and(|results| !results.is_empty())
+            || self.0["more"]
+                .as_array()
+                .is_some_and(|results| !results.is_empty());
+        let mut result = CallToolResult::structured(self.0);
+        if has_matches {
+            let structured = result.structured_content.as_ref().unwrap();
+            result.content = vec![ContentBlock::text(format!("Memory context:\n{structured}"))];
+        }
+        Ok(result.into())
+    }
+}
 
 /// MCP server name (spec 04).
 pub const SERVER_NAME: &str = "fff-memory";
@@ -172,12 +194,13 @@ impl MemoryServer {
     /// Layered lexical search with ranked snippets and a why per result.
     #[tool(
         name = "memory_search",
-        description = "Layered lexical search over memory notes. Returns ranked snippets with handles and a 'why' per result. Prefer 2–3 query reformulations before concluding a memory does not exist. Empty results explain stages tried."
+        description = "Layered lexical search over memory notes. Returns ranked snippets with handles and a 'why' per result. Prefer 2–3 query reformulations before concluding a memory does not exist. Empty results explain stages tried.",
+        output_schema = rmcp::handler::server::tool::schema_for_output::<serde_json::Value>()
     )]
     async fn memory_search(
         &self,
         Parameters(args): Parameters<MemorySearchArgs>,
-    ) -> Result<rmcp::handler::server::wrapper::Json<serde_json::Value>, McpError> {
+    ) -> Result<HookContextJson, McpError> {
         let resp = self
             .service
             .search(SearchOptions {
@@ -191,7 +214,7 @@ impl MemoryServer {
         let value = serde_json::to_value(resp).map_err(|e| {
             McpError::internal_error(format!("serialize search response: {e}"), None)
         })?;
-        Ok(rmcp::handler::server::wrapper::Json(value))
+        Ok(HookContextJson(value))
     }
 
     /// Fetch one full note by handle; records an access event.

@@ -1,22 +1,22 @@
 {
-  "name": "linehaul-ai-libsql-memory",
+  "name": "linehaul-ai-fff-memory",
   "owner": {
     "name": "fakebizprez",
     "email": "anthony@linehaul.ai"
   },
   "metadata": {
-    "description": "Persistent semantic memory plugin for Claude Code",
-    "version": "1.0.0"
+    "description": "Persistent lexical memory for Claude Code",
+    "version": "0.1.0"
   },
   "plugins": [
     {
-      "name": "libsql-memory",
+      "name": "fff-memory",
       "source": {
         "source": "url",
         "url": "https://github.com/linehaul-ai/libsql-memory.git"
       },
-      "description": "Persistent semantic memory for Claude Code with vector search",
-      "version": "1.0.0"
+      "description": "Persistent lexical memory for Claude Code",
+      "version": "0.1.0"
     }
   ]
 }

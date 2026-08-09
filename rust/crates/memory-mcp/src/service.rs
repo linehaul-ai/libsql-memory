@@ -226,6 +226,29 @@ impl MemoryService {
         let scope = scope_owned.as_deref();
         let scope_label = scope.unwrap_or("").to_string();
 
+        if query.is_empty() {
+            return Ok(SearchResponse {
+                results: Vec::new(),
+                more: Vec::new(),
+                stages_run: Vec::new(),
+                scope: scope_label,
+                empty_hint: Some(
+                    "no search stages ran; supply a non-empty query, then try broader terms".into(),
+                ),
+            });
+        }
+        if should_skip_automatic_query(query) {
+            return Ok(SearchResponse {
+                results: Vec::new(),
+                more: Vec::new(),
+                stages_run: Vec::new(),
+                scope: scope_label,
+                empty_hint: Some(
+                    "search intentionally skipped for a short, command, or greeting prompt".into(),
+                ),
+            });
+        }
+
         let Some(retriever) = self.retriever.as_ref() else {
             return Ok(index_unavailable_response(
                 &scope_label,
@@ -241,18 +264,6 @@ impl MemoryService {
         let mut file_raw: Vec<(PathBuf, f32)> = Vec::new();
         let mut plain_raw = Vec::new();
         let mut fuzzy_raw = Vec::new();
-
-        if query.is_empty() {
-            return Ok(SearchResponse {
-                results: Vec::new(),
-                more: Vec::new(),
-                stages_run: Vec::new(),
-                scope: scope_label,
-                empty_hint: Some(
-                    "no search stages ran; supply a non-empty query, then try broader terms".into(),
-                ),
-            });
-        }
 
         stages.push(MatchStage::FindFiles);
         stages.push(MatchStage::GrepPlain);
@@ -493,6 +504,24 @@ impl MemoryService {
     }
 }
 
+fn should_skip_automatic_query(query: &str) -> bool {
+    if query.chars().count() < 20 || query.starts_with('/') {
+        return true;
+    }
+    matches!(
+        query.to_ascii_lowercase().as_str(),
+        "hi" | "hello"
+            | "hey"
+            | "hello there"
+            | "hey there"
+            | "good morning"
+            | "good afternoon"
+            | "good evening"
+            | "how are you?"
+            | "hello, how are you doing?"
+    )
+}
+
 fn index_unavailable_response(scope: &str, state: IndexState) -> SearchResponse {
     let state = match state {
         IndexState::Cold => "cold",
@@ -710,7 +739,7 @@ mod tests {
             dir.path(),
             "proj/shipping.md",
             "Shipping Cadence",
-            &["release frequency", "deploys"],
+            &["release frequency schedule", "deploys"],
             "We ship weekly.",
         );
 
@@ -722,10 +751,10 @@ mod tests {
             }]),
             contents: Mutex::new(vec![ContentHit {
                 path: PathBuf::from("proj/shipping.md"),
-                snippet: "aliases:\n  - release frequency".into(),
+                snippet: "aliases:\n  - release frequency schedule".into(),
                 line: 3,
                 score: 0.9,
-                matched: ContentMatch::Alias("release frequency".into()),
+                matched: ContentMatch::Alias("release frequency schedule".into()),
             }]),
             find_error: Mutex::new(None),
             grep_error: Mutex::new(None),
@@ -735,7 +764,7 @@ mod tests {
         let svc = MemoryService::new(dir.path(), Some(Arc::new(fake)));
         let resp = svc
             .search(SearchOptions {
-                query: "shipping".into(),
+                query: "release frequency schedule".into(),
                 namespace: Some("proj".into()),
                 limit: 8,
                 budget_bytes: 4096,
@@ -757,17 +786,17 @@ mod tests {
             dir.path(),
             "proj/shipping.md",
             "Shipping Cadence",
-            &["first alias", "release frequency"],
+            &["first alias", "release frequency schedule"],
             "We ship weekly.",
         );
         let fake = FakeRetriever {
             state: IndexState::Ready,
             contents: Mutex::new(vec![ContentHit {
                 path: PathBuf::from("proj/shipping.md"),
-                snippet: "aliases: [first alias, release frequency]".into(),
+                snippet: "aliases: [first alias, release frequency schedule]".into(),
                 line: 3,
                 score: 1.0,
-                matched: ContentMatch::Alias("release frequency".into()),
+                matched: ContentMatch::Alias("release frequency schedule".into()),
             }]),
             ..FakeRetriever::ready()
         };
@@ -775,22 +804,22 @@ mod tests {
 
         let response = svc
             .search(SearchOptions {
-                query: "release frequency".into(),
+                query: "release frequency schedule".into(),
                 namespace: Some("proj".into()),
                 ..Default::default()
             })
             .unwrap();
 
-        assert_eq!(response.results[0].why, "alias:release frequency");
+        assert_eq!(response.results[0].why, "alias:release frequency schedule");
     }
 
     #[test]
     fn search_why_reports_title_tags_and_body() {
         let dir = tempdir().unwrap();
         for (name, title, body) in [
-            ("title", "Needle Title", "body"),
+            ("title", "Needle Retrieval Phrase Title", "body"),
             ("tags", "Tag Note", "body"),
-            ("body", "Body Note", "needle body"),
+            ("body", "Body Note", "needle retrieval phrase body"),
         ] {
             seed_note(
                 dir.path(),
@@ -805,21 +834,21 @@ mod tests {
             contents: Mutex::new(vec![
                 ContentHit {
                     path: PathBuf::from("proj/title.md"),
-                    snippet: "title: Needle Title".into(),
+                    snippet: "title: Needle Retrieval Phrase Title".into(),
                     line: 2,
                     score: 1.0,
                     matched: ContentMatch::Title,
                 },
                 ContentHit {
                     path: PathBuf::from("proj/tags.md"),
-                    snippet: "- needle".into(),
+                    snippet: "- needle retrieval phrase".into(),
                     line: 6,
                     score: 0.9,
                     matched: ContentMatch::Tags,
                 },
                 ContentHit {
                     path: PathBuf::from("proj/body.md"),
-                    snippet: "needle body".into(),
+                    snippet: "needle retrieval phrase body".into(),
                     line: 9,
                     score: 0.8,
                     matched: ContentMatch::Body,
@@ -831,7 +860,7 @@ mod tests {
 
         let response = svc
             .search(SearchOptions {
-                query: "needle".into(),
+                query: "needle retrieval phrase".into(),
                 namespace: Some("proj".into()),
                 ..Default::default()
             })
@@ -852,7 +881,7 @@ mod tests {
         let dir = tempdir().unwrap();
         seed_note(
             dir.path(),
-            "proj/shipping.md",
+            "proj/shipping-cadence-policy.md",
             "Shipping Cadence",
             &["release frequency", "deploys"],
             "We ship weekly.",
@@ -863,7 +892,7 @@ mod tests {
         let fake = FakeRetriever {
             state: IndexState::Ready,
             files: Mutex::new(vec![FileHit {
-                path: PathBuf::from("proj/shipping.md"),
+                path: PathBuf::from("proj/shipping-cadence-policy.md"),
                 score: 1.0,
             }]),
             ..Default::default()
@@ -872,13 +901,13 @@ mod tests {
 
         let response = svc
             .search(SearchOptions {
-                query: "shipping".into(),
+                query: "shipping-cadence-policy".into(),
                 namespace: Some("proj".into()),
                 ..Default::default()
             })
             .unwrap();
 
-        assert_eq!(response.results[0].handle, "proj/shipping");
+        assert_eq!(response.results[0].handle, "proj/shipping-cadence-policy");
         assert!(!response.results[0].why.contains("frecency"));
     }
 
@@ -889,7 +918,7 @@ mod tests {
         let svc = MemoryService::new(dir.path(), Some(Arc::new(fake)));
         let resp = svc
             .search(SearchOptions {
-                query: "zzzz-no-match".into(),
+                query: "zzzz-no-substantive-match".into(),
                 ..Default::default()
             })
             .unwrap();
@@ -913,7 +942,7 @@ mod tests {
         ] {
             let response = MemoryService::new(dir.path(), retriever)
                 .search(SearchOptions {
-                    query: "anything".into(),
+                    query: "substantive unavailable query".into(),
                     ..Default::default()
                 })
                 .unwrap();
@@ -939,6 +968,96 @@ mod tests {
         assert!(response.empty_hint.unwrap().contains("non-empty query"));
     }
 
+    struct CountingRetriever {
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl Retriever for CountingRetriever {
+        fn find_files(
+            &self,
+            _query: &str,
+            _scope: Option<&str>,
+            _include_archived: bool,
+        ) -> Result<Vec<FileHit>> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(Vec::new())
+        }
+
+        fn grep(
+            &self,
+            _query: &str,
+            _mode: GrepMode,
+            _scope: Option<&str>,
+            _include_archived: bool,
+        ) -> Result<Vec<ContentHit>> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(Vec::new())
+        }
+
+        fn index_state(&self) -> IndexState {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            IndexState::Ready
+        }
+
+        fn reindex(&self) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn hook_noise_queries_skip_without_touching_the_retriever() {
+        for query in [
+            "Unicode 🦀 query",
+            "/memory-status",
+            "hello, how are you doing?",
+        ] {
+            let dir = tempdir().unwrap();
+            let calls = Arc::new(AtomicUsize::new(0));
+            let service = MemoryService::new(
+                dir.path(),
+                Some(Arc::new(CountingRetriever {
+                    calls: calls.clone(),
+                })),
+            );
+
+            let response = service
+                .search(SearchOptions {
+                    query: query.into(),
+                    ..Default::default()
+                })
+                .unwrap();
+
+            assert!(response.results.is_empty());
+            assert!(response.stages_run.is_empty());
+            assert_eq!(calls.load(Ordering::SeqCst), 0, "query={query:?}");
+            assert!(response
+                .empty_hint
+                .unwrap()
+                .contains("intentionally skipped"));
+        }
+    }
+
+    #[test]
+    fn substantive_query_reaches_the_retriever() {
+        let dir = tempdir().unwrap();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let service = MemoryService::new(
+            dir.path(),
+            Some(Arc::new(CountingRetriever {
+                calls: calls.clone(),
+            })),
+        );
+
+        service
+            .search(SearchOptions {
+                query: "explain the deployment policy decision".into(),
+                ..Default::default()
+            })
+            .unwrap();
+
+        assert!(calls.load(Ordering::SeqCst) > 0);
+    }
+
     #[test]
     fn archived_search_uses_logical_handle() {
         let dir = tempdir().unwrap();
@@ -947,13 +1066,13 @@ mod tests {
             ".archive/proj/old.md",
             "Old Note",
             &["retired note", "archived note"],
-            "retired body",
+            "retired memory body note",
         );
         let fake = FakeRetriever {
             state: IndexState::Ready,
             contents: Mutex::new(vec![ContentHit {
                 path: PathBuf::from(".archive/proj/old.md"),
-                snippet: "retired body".into(),
+                snippet: "retired memory body note".into(),
                 line: 8,
                 score: 1.0,
                 matched: ContentMatch::Body,
@@ -964,7 +1083,7 @@ mod tests {
 
         let response = svc
             .search(SearchOptions {
-                query: "retired".into(),
+                query: "retired memory body note".into(),
                 namespace: Some("proj".into()),
                 include_archived: true,
                 ..Default::default()
@@ -976,7 +1095,7 @@ mod tests {
             .read(&response.results[0].handle)
             .expect("read archived search result");
         assert_eq!(read.frontmatter.title, "Old Note");
-        assert_eq!(read.body.trim(), "retired body");
+        assert_eq!(read.body.trim(), "retired memory body note");
     }
 
     #[test]
@@ -984,14 +1103,14 @@ mod tests {
         let dir = tempdir().unwrap();
         seed_note(
             dir.path(),
-            "proj/same.md",
+            "proj/same-active-memory-note.md",
             "Active Note",
             &["current note", "live note"],
             "active body",
         );
         seed_note(
             dir.path(),
-            ".archive/proj/same.md",
+            ".archive/proj/same-active-memory-note.md",
             "Archived Note",
             &["retired note", "old note"],
             "archived body",
@@ -1000,11 +1119,11 @@ mod tests {
             state: IndexState::Ready,
             files: Mutex::new(vec![
                 FileHit {
-                    path: PathBuf::from(".archive/proj/same.md"),
+                    path: PathBuf::from(".archive/proj/same-active-memory-note.md"),
                     score: 1.0,
                 },
                 FileHit {
-                    path: PathBuf::from("proj/same.md"),
+                    path: PathBuf::from("proj/same-active-memory-note.md"),
                     score: 0.5,
                 },
             ]),
@@ -1014,7 +1133,7 @@ mod tests {
 
         let response = svc
             .search(SearchOptions {
-                query: "same".into(),
+                query: "same-active-memory-note".into(),
                 namespace: Some("proj".into()),
                 include_archived: true,
                 ..Default::default()
@@ -1022,9 +1141,15 @@ mod tests {
             .expect("collision search");
 
         assert_eq!(response.results.len(), 1, "response={response:?}");
-        assert_eq!(response.results[0].handle, "proj/same");
+        assert_eq!(response.results[0].handle, "proj/same-active-memory-note");
         assert_eq!(response.results[0].title, "Active Note");
-        assert_eq!(svc.read("proj/same").unwrap().body.trim(), "active body");
+        assert_eq!(
+            svc.read("proj/same-active-memory-note")
+                .unwrap()
+                .body
+                .trim(),
+            "active body"
+        );
     }
 
     #[test]
@@ -1042,13 +1167,13 @@ mod tests {
             ".archive/proj/same.md",
             "Archived Note",
             &["retired note", "old note"],
-            "archive-only-needle",
+            "archive-only-needle-query",
         );
         let fake = FakeRetriever {
             state: IndexState::Ready,
             contents: Mutex::new(vec![ContentHit {
                 path: PathBuf::from(".archive/proj/same.md"),
-                snippet: "archive-only-needle".into(),
+                snippet: "archive-only-needle-query".into(),
                 line: 8,
                 score: 1.0,
                 matched: ContentMatch::Body,
@@ -1059,7 +1184,7 @@ mod tests {
 
         let response = svc
             .search(SearchOptions {
-                query: "archive-only-needle".into(),
+                query: "archive-only-needle-query".into(),
                 namespace: Some("proj".into()),
                 include_archived: true,
                 ..Default::default()
@@ -1137,7 +1262,7 @@ mod tests {
         let started = Instant::now();
         let response = svc
             .search(SearchOptions {
-                query: "needle".into(),
+                query: "substantive needle query".into(),
                 namespace: Some("proj".into()),
                 ..Default::default()
             })
@@ -1222,14 +1347,14 @@ mod tests {
             let svc = MemoryService::new(dir.path(), Some(Arc::new(fake)));
             let error = svc
                 .search(SearchOptions {
-                    query: "needle".into(),
+                    query: "substantive needle query".into(),
                     namespace: Some("proj".into()),
                     ..Default::default()
                 })
                 .unwrap_err()
                 .to_string();
             assert!(error.contains(stage), "error={error}");
-            assert!(error.contains("needle"), "error={error}");
+            assert!(error.contains("substantive needle query"), "error={error}");
             assert!(error.contains("proj"), "error={error}");
         }
     }
@@ -1286,7 +1411,7 @@ mod tests {
 
         let response = svc
             .search(SearchOptions {
-                query: "needle".into(),
+                query: "substantive needle query".into(),
                 limit: 1,
                 ..Default::default()
             })
@@ -1313,7 +1438,7 @@ mod tests {
 
         let response = svc
             .search(SearchOptions {
-                query: "needle".into(),
+                query: "substantive needle query".into(),
                 budget_bytes: 0,
                 ..Default::default()
             })

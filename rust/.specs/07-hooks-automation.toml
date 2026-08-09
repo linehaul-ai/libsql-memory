@@ -18,16 +18,20 @@ rules = [
 event = "SessionStart"
 action = "memory_search for the current project's namespace; inject top hits as brief context"
 skip = "no memory root configured, or empty store"
+handler = "one mcp_tool call to plugin:fff-memory:fff-memory; first-run disconnected errors are non-blocking because SessionStart usually fires before MCP connects"
 
 [[hook]]
 event = "UserPromptSubmit"
 action = "memory_search with 2-3 key terms from the prompt; inject only results above a floor score, capped at ~500 tokens"
 skip = "prompt under 20 chars, slash commands, greetings"
+handler = "one mcp_tool memory_search call with ${prompt}, a 2048-byte budget, and fail-open timeout"
+skip_implementation = "MemoryService::search returns an intentional empty response before touching the retriever; hook `if` conditions apply only to tool permission rules"
 
 [[hook]]
 event = "Stop"
 action = "one memory_store of type session-summary IF the session made substantive decisions or discoveries; otherwise nothing"
 skip = "trivial sessions; anything already stored during the session"
+handler = "one concise agent hook calls memory_store at most once with type session-summary and 2-6 future-question aliases, or calls nothing"
 
 [deliberately_absent]
 pre_tool_use = "predecessor fired a memory search before every Write/Edit — per-edit latency and noise for marginal recall; the UserPromptSubmit search already covers intent"
@@ -51,3 +55,5 @@ list = [
 [plugin_packaging]
 distribution = "Claude Code plugin: .mcp.json launches 'fff-memory serve'; hooks + skill + commands ship in the plugin directory"
 portability = "no absolute paths in any shipped config (predecessor's .mcp.json hardcoded /Users/fakebizprez/...); use ${CLAUDE_PLUGIN_ROOT} and a small launcher only if the variable cannot expand in args"
+mcp_server = "fff-memory; .mcp.json launches cargo run --quiet against ${CLAUDE_PLUGIN_ROOT}/rust/Cargo.toml and passes serve --project ${CLAUDE_PROJECT_DIR}"
+hook_context = "For non-empty matches, memory_search keeps structuredContent and prefixes text content with 'Memory context:' so direct MCP hooks inject context instead of parsing the JSON text as a hook decision. Empty responses remain JSON and inject no noise."

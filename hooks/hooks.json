@@ -1,0 +1,50 @@
+{
+  "description": "Thin, fail-open retrieval and session-summary hooks for fff-memory",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "mcp_tool",
+            "server": "plugin:fff-memory:fff-memory",
+            "tool": "memory_search",
+            "input": {
+              "query": "project decisions conventions preferences",
+              "limit": 8,
+              "budget_bytes": 2048
+            },
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "mcp_tool",
+            "server": "plugin:fff-memory:fff-memory",
+            "tool": "memory_search",
+            "input": {
+              "query": "${prompt}",
+              "limit": 8,
+              "budget_bytes": 2048
+            },
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "agent",
+            "prompt": "Review $ARGUMENTS. If the session produced substantive decisions or discoveries not already stored, call memory_store at most once with type session-summary and 2–6 future-question aliases; otherwise do nothing.\nNever store secrets or routine activity. Return {\"ok\":true} after storing or skipping.",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}

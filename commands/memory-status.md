@@ -1,15 +1,7 @@
 ---
+description: Show fff-memory store health.
 allowed-tools:
-  - mcp__libsql-memory__memory_stats
-  - mcp__libsql-memory__memory_list
+  - mcp__fff-memory__memory_stats
 ---
 
-Show memory statistics and overview.
-
-Use the memory_stats tool to get storage statistics, then memory_list to show recent entries.
-
-Display:
-- Total entries stored
-- Namespaces in use
-- Storage size
-- Recent entries (last 5)
+Call `memory_stats` once and present its counts, disk use, index state, access-log summary, and expiry signals concisely. Do not mutate the store.

@@ -1,13 +1,19 @@
 {
   "mcpServers": {
-    "libsql-memory": {
-      "command": "bash",
-      "args": ["/Users/fakebizprez/Developer/projects/libsql-memory/bin/run.sh"],
-      "env": {
-        "CLAUDE_PLUGIN_ROOT": "/Users/fakebizprez/Developer/projects/libsql-memory",
-        "LIBSQL_MEMORY_EMBEDDING_PROVIDER": "nomic",
-        "LIBSQL_MEMORY_EMBEDDING_ENDPOINT": "http://192.168.128.10:1234/v1/embeddings"
-      }
+    "fff-memory": {
+      "command": "cargo",
+      "args": [
+        "run",
+        "--quiet",
+        "--manifest-path",
+        "${CLAUDE_PLUGIN_ROOT}/rust/Cargo.toml",
+        "--bin",
+        "fff-memory",
+        "--",
+        "serve",
+        "--project",
+        "${CLAUDE_PROJECT_DIR}"
+      ]
     }
   }
 }

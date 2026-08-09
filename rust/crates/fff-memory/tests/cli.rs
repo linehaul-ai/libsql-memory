@@ -163,7 +163,12 @@ fn tool_mirrors_emit_one_json_object() {
 
     let searched = json_stdout(
         &bin()
-            .args(["search", "deploy", "--root", root.to_str().unwrap()])
+            .args([
+                "search",
+                "Prefer blue-green releases.",
+                "--root",
+                root.to_str().unwrap(),
+            ])
             .output()
             .unwrap(),
     );
@@ -392,7 +397,7 @@ fn project_selects_dot_memory_and_conflicts_only_with_explicit_root() {
 
     let out = bin()
         .current_dir(&cwd_project)
-        .args(["search", "resolver", "--project"])
+        .args(["search", "substantive resolver query", "--project"])
         .output()
         .unwrap();
     assert!(json_stdout(&out)["results"].is_array());
@@ -522,7 +527,7 @@ fn unavailable_index_does_not_block_store_or_truthful_empty_search() {
     );
 
     let out = bin()
-        .args(["search", "index", "--root"])
+        .args(["search", "substantive index query", "--root"])
         .arg(&root)
         .output()
         .unwrap();

@@ -1,9 +1,11 @@
 {
-  "name": "libsql-memory",
-  "version": "1.0.0",
-  "description": "Persistent semantic memory for Claude Code with vector search",
+  "name": "fff-memory",
+  "version": "0.1.0",
+  "description": "Persistent lexical memory for Claude Code",
   "author": {
     "name": "fakebizprez",
     "email": "anthony@linehaul.ai"
-  }
+  },
+  "repository": "https://github.com/linehaul-ai/libsql-memory.git",
+  "license": "MIT"
 }
