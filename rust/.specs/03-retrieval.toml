@@ -21,6 +21,7 @@ archive_collisions = "an active note shadows the archived note with the same log
 
 [ranking]
 match_score = "memory-index rejects weak native filename-fuzzy hits using raw fff base score before that signal is discarded, then each retained backend result page normalizes its native score to 0.0..=1.0 before merge; merged notes take the max component plus the both-stages bonus"
+fuzzy_confidence = "the backend-neutral merge scales fuzzy-grep components to 0.95 so escalation expands recall without displacing an equal-score plain match; path and plain components remain unscaled, and the existing path-plus-content bonus is applied afterward"
 filename_confidence = "the pre-normalization filename gate is backend-specific and therefore stays inside memory-index, the only fff-aware crate; its corpus-calibrated floor is 2 * the alphanumeric query length, while exact/plain/fuzzy content retrieval remains unchanged"
 frecency_multiplier = "derived from the access log as read + 0.25 * search_hit (see 05-lifecycle.toml); recently/frequently retrieved notes rank higher"
 type_boosts = "small static boosts: preference and decision outrank session-summary at equal match score"

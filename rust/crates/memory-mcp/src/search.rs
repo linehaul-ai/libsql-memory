@@ -16,6 +16,8 @@ pub const BUDGET_BYTES_MAX: usize = 16384;
 pub const MIN_RESULTS_FOR_FUZZY: usize = 3;
 /// Bonus when the same note matched path-find and content-grep.
 pub const BOTH_STAGES_BONUS: f32 = 0.15;
+/// Fuzzy grep expands recall without tying an exact plain-content match.
+const FUZZY_SCORE_SCALE: f32 = 0.95;
 
 /// Which pipeline stage produced a hit component.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -144,12 +146,14 @@ pub fn merge_hits(
         );
     }
     for hit in fuzzy_hits {
+        let mut hit = hit.clone();
+        hit.score *= FUZZY_SCORE_SCALE;
         upsert(
             &mut map,
             hit.path.clone(),
             hit.score,
             MatchStage::GrepFuzzy,
-            Some(hit.clone()),
+            Some(hit),
             String::new(),
         );
     }
@@ -515,11 +519,35 @@ mod tests {
             ContentMatch::Alias("best alias".into())
         );
         assert_eq!(hit.content.as_ref().unwrap().snippet, "best");
-        assert!((hit.match_score - (0.4 + BOTH_STAGES_BONUS)).abs() < 1e-5);
+        assert!((hit.match_score - (0.4 * FUZZY_SCORE_SCALE + BOTH_STAGES_BONUS)).abs() < 1e-5);
         assert_eq!(hit.stages.len(), 3);
         assert!(hit.stages.contains(&MatchStage::FindFiles));
         assert!(hit.stages.contains(&MatchStage::GrepPlain));
         assert!(hit.stages.contains(&MatchStage::GrepFuzzy));
+    }
+
+    #[test]
+    fn fuzzy_expansion_does_not_displace_equal_score_plain_match() {
+        let content_hit = |path: &str, alias: &str| ContentHit {
+            path: PathBuf::from(path),
+            snippet: format!("aliases: [{alias}]"),
+            line: 3,
+            score: 1.0,
+            matched: ContentMatch::Alias(alias.into()),
+        };
+        let plain = vec![content_hit("z-exact.md", "lookup phrase 1234")];
+        let fuzzy = vec![
+            content_hit("z-exact.md", "lookup phrase 1234"),
+            content_hit("a-near.md", "lookup phrase 123"),
+            content_hit("b-near.md", "lookup phrase 124"),
+            content_hit("c-near.md", "lookup phrase 134"),
+        ];
+
+        let ranked = rank_hits(merge_hits(&[], &plain, &fuzzy), &HashMap::new());
+
+        assert_eq!(ranked[0].handle, "z-exact");
+        assert_eq!(ranked[0].why, "alias:lookup phrase 1234");
+        assert!(ranked[0].score > ranked[1].score);
     }
 
     #[test]
