@@ -286,14 +286,15 @@ pub fn type_boost(note_type: NoteType) -> f32 {
     }
 }
 
-/// Frecency multiplier from access count in the ranking window.
+/// Frecency multiplier from weighted access counts in the ranking window.
 ///
-/// `1.0` when never accessed; grows gently with more reads (capped).
-pub fn frecency_multiplier(access_count_30d: u32) -> f32 {
-    if access_count_30d == 0 {
+/// One read reinforces as much as four search-result hits; growth is capped.
+pub fn frecency_multiplier(read_count_30d: u32, search_hit_count_30d: u32) -> f32 {
+    let weighted_access = read_count_30d as f32 + search_hit_count_30d as f32 * 0.25;
+    if weighted_access == 0.0 {
         return 1.0;
     }
-    1.0 + (access_count_30d as f32 * 0.05).min(0.5)
+    1.0 + (weighted_access * 0.05).min(0.5)
 }
 
 /// Apply type + frecency multipliers; fill handle/title from caller-supplied meta.
@@ -301,22 +302,23 @@ pub fn rank_hits(merged: Vec<MergedHit>, meta: &HashMap<PathBuf, NoteMeta>) -> V
     let mut ranked: Vec<RankedHit> = merged
         .into_iter()
         .map(|m| {
-            let (title, note_type, access_count, handle) = meta
+            let (title, note_type, read_count, search_hit_count, handle) = meta
                 .get(&m.path)
                 .map(|n| {
                     (
                         n.title.clone(),
                         n.note_type,
-                        n.access_count_30d,
+                        n.read_count_30d,
+                        n.search_hit_count_30d,
                         n.handle.clone(),
                     )
                 })
                 .unwrap_or_else(|| {
                     let handle = path_to_handle(&m.path);
-                    (handle.clone(), NoteType::Fact, 0, handle)
+                    (handle.clone(), NoteType::Fact, 0, 0, handle)
                 });
 
-            let mult = type_boost(note_type) * frecency_multiplier(access_count);
+            let mult = type_boost(note_type) * frecency_multiplier(read_count, search_hit_count);
             let score = m.match_score * mult;
 
             let mut why = m.why_parts.join(" +");
@@ -328,8 +330,10 @@ pub fn rank_hits(merged: Vec<MergedHit>, meta: &HashMap<PathBuf, NoteMeta>) -> V
                     .collect::<Vec<_>>()
                     .join("+");
             }
-            if access_count > 0 {
-                why.push_str(&format!(" +frecency({access_count} reads/30d)"));
+            if read_count > 0 || search_hit_count > 0 {
+                why.push_str(&format!(
+                    " +frecency({read_count}r+{search_hit_count}s/30d)"
+                ));
             }
 
             let snippet = if m.snippet.is_empty() {
@@ -365,8 +369,10 @@ pub struct NoteMeta {
     pub title: String,
     /// Note kind for type boost.
     pub note_type: NoteType,
-    /// Accesses in the last 30 days (from access log).
-    pub access_count_30d: u32,
+    /// Full reads in the last 30 days (from access log).
+    pub read_count_30d: u32,
+    /// Search-result hits in the last 30 days (from access log).
+    pub search_hit_count_30d: u32,
     /// `namespace/slug` handle.
     pub handle: String,
 }
@@ -520,7 +526,8 @@ mod tests {
             NoteMeta {
                 title: "Low".into(),
                 note_type: NoteType::SessionSummary,
-                access_count_30d: 0,
+                read_count_30d: 0,
+                search_hit_count_30d: 0,
                 handle: "low".into(),
             },
         );
@@ -529,7 +536,8 @@ mod tests {
             NoteMeta {
                 title: "High".into(),
                 note_type: NoteType::Preference,
-                access_count_30d: 10,
+                read_count_30d: 10,
+                search_hit_count_30d: 0,
                 handle: "high".into(),
             },
         );
@@ -614,8 +622,41 @@ mod tests {
 
     #[test]
     fn frecency_is_one_when_zero_accesses() {
-        assert!((frecency_multiplier(0) - 1.0).abs() < 1e-6);
-        assert!(frecency_multiplier(20) > frecency_multiplier(1));
-        assert!((frecency_multiplier(100) - 1.5).abs() < 1e-5);
+        assert!((frecency_multiplier(0, 0) - 1.0).abs() < 1e-6);
+        assert!(frecency_multiplier(20, 0) > frecency_multiplier(1, 0));
+        assert!((frecency_multiplier(100, 0) - 1.5).abs() < 1e-5);
+    }
+
+    #[test]
+    fn reads_reinforce_more_than_search_hits() {
+        assert!(frecency_multiplier(1, 0) > frecency_multiplier(0, 1));
+        assert!((frecency_multiplier(1, 0) - frecency_multiplier(0, 4)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn why_distinguishes_read_and_search_hit_counts() {
+        let path = PathBuf::from("note.md");
+        let merged = vec![MergedHit {
+            path: path.clone(),
+            match_score: 1.0,
+            stages: vec![MatchStage::FindFiles],
+            snippet: "hit".into(),
+            why_parts: vec!["path:note".into()],
+        }];
+        let meta = HashMap::from([(
+            path,
+            NoteMeta {
+                title: "Note".into(),
+                note_type: NoteType::Fact,
+                read_count_30d: 3,
+                search_hit_count_30d: 8,
+                handle: "note".into(),
+            },
+        )]);
+
+        let ranked = rank_hits(merged, &meta);
+
+        assert!(ranked[0].why.contains("3r+8s/30d"), "{}", ranked[0].why);
+        assert!(!ranked[0].why.contains("reads"), "{}", ranked[0].why);
     }
 }

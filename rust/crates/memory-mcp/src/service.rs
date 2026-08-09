@@ -10,8 +10,8 @@ use crate::search::{
     BUDGET_BYTES_DEFAULT, BUDGET_BYTES_MAX, MIN_RESULTS_FOR_FUZZY, SEARCH_LIMIT_DEFAULT,
 };
 use memory_core::{
-    extract_wikilinks, AccessLog, AccessVia, GrepMode, IndexState, MemoryStore, MergeMode, Note,
-    NoteFrontmatter, NoteType, Retriever, StoreAction, StoreInput, StoreOutcome,
+    extract_wikilinks, AccessLog, AccessSnapshot, AccessVia, GrepMode, IndexState, MemoryStore,
+    MergeMode, Note, NoteFrontmatter, NoteType, Retriever, StoreAction, StoreInput, StoreOutcome,
 };
 use memory_core::{Error, Result};
 use serde::{Deserialize, Serialize};
@@ -289,10 +289,11 @@ impl MemoryService {
             merged = merge_hits(&file_raw, &plain_raw, &fuzzy_raw);
         }
 
-        // Load meta for ranking
+        // Access history is advisory for ranking; corrupt state gives neutral frecency.
+        let access_snapshot = self.access.snapshot().ok();
         let mut meta = HashMap::new();
         for m in &merged {
-            if let Some(nm) = self.load_meta(&m.path) {
+            if let Some(nm) = self.load_meta(&m.path, access_snapshot.as_ref()) {
                 meta.insert(m.path.clone(), nm);
             }
         }
@@ -394,6 +395,7 @@ impl MemoryService {
 
     /// Store health snapshot.
     pub fn stats(&self, namespace: Option<&str>) -> Result<StatsSnapshot> {
+        let access_snapshot = self.access.snapshot()?;
         let mut total = 0u64;
         let mut by_namespace: HashMap<String, u64> = HashMap::new();
         let mut by_type: HashMap<String, u64> = HashMap::new();
@@ -424,7 +426,7 @@ impl MemoryService {
             *by_type.entry(type_key.into()).or_insert(0) += 1;
 
             let handle = path_to_handle(&rel);
-            if self.access.count_recent(&handle, 30) == 0 {
+            if !access_snapshot.ever_accessed(&handle) {
                 let age_days = (today - note.frontmatter.created).whole_days();
                 if age_days >= 30 {
                     never_accessed_30d += 1;
@@ -458,7 +460,7 @@ impl MemoryService {
                 state: state.into(),
                 files_indexed: snapshot.files_indexed,
                 last_scan_ms: snapshot.last_scan_ms,
-                access_log_events: self.access.len() as u64,
+                access_log_events: access_snapshot.event_count() as u64,
             },
             decay: DecayStats {
                 never_accessed_30d,
@@ -467,16 +469,19 @@ impl MemoryService {
         })
     }
 
-    fn load_meta(&self, rel: &Path) -> Option<NoteMeta> {
+    fn load_meta(&self, rel: &Path, access: Option<&AccessSnapshot>) -> Option<NoteMeta> {
         let abs = self.store.root().join(rel);
         let text = fs::read_to_string(abs).ok()?;
         let note = Note::parse(&text).ok()?;
         let handle = path_to_handle(rel);
-        let access_count_30d = self.access.count_recent(&handle, 30);
+        let access_counts = access
+            .map(|snapshot| snapshot.recent_counts(&handle, 30))
+            .unwrap_or_default();
         Some(NoteMeta {
             title: note.frontmatter.title,
             note_type: note.frontmatter.note_type,
-            access_count_30d,
+            read_count_30d: access_counts.read as u32,
+            search_hit_count_30d: access_counts.search_hit as u32,
             handle,
         })
     }
@@ -713,6 +718,41 @@ mod tests {
         assert!(resp.stages_run.iter().any(|s| s == "find_files"));
         assert!(resp.stages_run.iter().any(|s| s == "grep_plain"));
         assert!(resp.empty_hint.is_none());
+    }
+
+    #[test]
+    fn search_uses_neutral_frecency_when_access_state_is_corrupt() {
+        let dir = tempdir().unwrap();
+        seed_note(
+            dir.path(),
+            "proj/shipping.md",
+            "Shipping Cadence",
+            &["release frequency", "deploys"],
+            "We ship weekly.",
+        );
+        let access = AccessLog::open(dir.path());
+        fs::create_dir_all(access.path().parent().unwrap()).unwrap();
+        fs::write(access.path(), "{corrupt}\n").unwrap();
+        let fake = FakeRetriever {
+            state: IndexState::Ready,
+            files: Mutex::new(vec![FileHit {
+                path: PathBuf::from("proj/shipping.md"),
+                score: 1.0,
+            }]),
+            ..Default::default()
+        };
+        let svc = MemoryService::new(dir.path(), Some(Arc::new(fake)));
+
+        let response = svc
+            .search(SearchOptions {
+                query: "shipping".into(),
+                namespace: Some("proj".into()),
+                ..Default::default()
+            })
+            .unwrap();
+
+        assert_eq!(response.results[0].handle, "proj/shipping");
+        assert!(!response.results[0].why.contains("frecency"));
     }
 
     #[test]
@@ -1085,6 +1125,39 @@ mod tests {
         assert_eq!(response.results.len(), 1);
         assert_eq!(svc.access.len(), 1);
         assert_eq!(fake.tracked.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn stats_does_not_call_an_old_access_never_accessed() {
+        let dir = tempdir().unwrap();
+        let created = (time::OffsetDateTime::now_utc() - time::Duration::days(120)).date();
+        seed_note(
+            dir.path(),
+            "proj/old.md",
+            "Old",
+            &["old one", "old two"],
+            "body",
+        );
+        let path = dir.path().join("proj/old.md");
+        let text = fs::read_to_string(&path)
+            .unwrap()
+            .replace("created: 2026-01-01", &format!("created: {created}"));
+        fs::write(path, text).unwrap();
+        let access = AccessLog::open(dir.path());
+        access
+            .append_event(memory_core::AccessEvent {
+                ts: (time::OffsetDateTime::now_utc() - time::Duration::days(100))
+                    .format(&time::format_description::well_known::Rfc3339)
+                    .unwrap(),
+                handle: "proj/old".into(),
+                via: AccessVia::Read,
+            })
+            .unwrap();
+        access.compact(90).unwrap();
+
+        let stats = MemoryService::new(dir.path(), None).stats(None).unwrap();
+
+        assert_eq!(stats.decay.never_accessed_30d, 0);
     }
 
     #[test]

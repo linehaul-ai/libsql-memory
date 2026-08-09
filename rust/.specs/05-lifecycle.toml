@@ -16,11 +16,16 @@ OQ-1 in 08-roadmap.toml). If fff's frecency store persists across restarts in
 embedded use, it supplements ranking; if not, nothing breaks — the access log
 is the authority for lifecycle decisions either way.
 """
-compaction = "doctor rolls entries older than 90 days into per-note counters"
+compaction = "doctor rolls entries older than 90 days into per-note, per-via counters"
+integrity = "append, snapshot, and compaction coordinate across processes through .index/access.lock"
+recovery = "access_counts.json stores an inclusive compacted_through RFC3339 cutoff; counters are replaced before the compacted log, and readers ignore source events at or before the cutoff so interruption is idempotent"
+validation = "every nonblank JSONL line is parsed strictly; errors name the access-log path and physical line number"
+snapshot = "one fallible, coherent snapshot exposes per-via recent counts and whether each handle was ever accessed"
 
 [reinforcement]
 rule = "memory_read records an access event; search hits record a lighter-weight event"
 effect = "frequently retrieved notes gain a ranking multiplier — emergent spaced repetition"
+weight = "ranking reinforcement is read + 0.25 * search_hit; why text reports Nr+Ms/30d"
 non_effect = "reads never touch the note file itself (updated stays a content timestamp; mtime stays meaningful for the watcher)"
 backend = "only search results that survive limit and budget shaping are recorded and sent to the retriever's best-effort access tracker"
 
@@ -41,6 +46,7 @@ checks = [
   "access-log compaction",
 ]
 output = "human-readable report; --apply performs archive moves and compaction, prints a suggested git commit message"
+failure_policy = "doctor validates one coherent access snapshot before decay decisions; --apply performs no archive moves when lifecycle state is corrupt"
 
 [reindex]
 command = "fff-memory reindex"

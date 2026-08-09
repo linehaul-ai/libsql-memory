@@ -158,6 +158,7 @@ pub fn run_doctor(
     let root = root.as_ref();
     let store = MemoryStore::new(root);
     let access = AccessLog::open(root);
+    let access_snapshot = access.snapshot()?;
     let today = OffsetDateTime::now_utc().date();
 
     let mut archive_candidates = Vec::new();
@@ -194,7 +195,7 @@ pub fn run_doctor(
         }
 
         // Never accessed within 30 days of creation (age ≥ 30 and never accessed)
-        if age_days >= NEVER_ACCESSED_DAYS && !access.ever_accessed(&handle) {
+        if age_days >= NEVER_ACCESSED_DAYS && !access_snapshot.ever_accessed(&handle) {
             reasons.push(format!(
                 "never accessed within {NEVER_ACCESSED_DAYS}d of creation"
             ));
@@ -203,8 +204,8 @@ pub fn run_doctor(
         // No access in 90 days: note is old enough and has no recent JSONL events.
         // When never-accessed already fired, skip the redundant stale label.
         if age_days >= STALE_DAYS
-            && !access.accessed_within(&handle, STALE_DAYS)
-            && access.ever_accessed(&handle)
+            && !access_snapshot.accessed_within(&handle, STALE_DAYS)
+            && access_snapshot.ever_accessed(&handle)
         {
             reasons.push(format!("no access in {STALE_DAYS}d"));
         }
@@ -567,6 +568,35 @@ mod tests {
         assert!(dir.path().join(".archive/gone/x.md").is_file());
         assert!(report.suggested_commit_message.is_some());
         assert!(report.compaction.is_some());
+    }
+
+    #[test]
+    fn apply_refuses_to_archive_when_access_state_is_corrupt() {
+        let dir = tempdir().unwrap();
+        let created = days_ago_date(100);
+        write_note_custom(
+            dir.path(),
+            NoteFix {
+                rel: "keep/x.md",
+                title: "Keep",
+                aliases: "  - a\n  - b",
+                typ: "fact",
+                created: &created,
+                body: "body",
+                extra: "expires: 2020-06-01\n",
+            },
+        );
+        let log = AccessLog::open(dir.path());
+        fs::create_dir_all(log.path().parent().unwrap()).unwrap();
+        fs::write(log.path(), "{corrupt}\n").unwrap();
+
+        let error = run_doctor(dir.path(), None, DoctorOptions { apply: true })
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains(&log.path().display().to_string()), "{error}");
+        assert!(dir.path().join("keep/x.md").is_file());
+        assert!(!dir.path().join(".archive/keep/x.md").exists());
     }
 
     #[test]

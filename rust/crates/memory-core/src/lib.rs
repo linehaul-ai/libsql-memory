@@ -22,7 +22,7 @@ mod slugify;
 mod store;
 
 pub use access_log::{
-    AccessCounters, AccessEvent, AccessLog, AccessVia, CompactionStats, ViaCounts,
+    AccessCounters, AccessEvent, AccessLog, AccessSnapshot, AccessVia, CompactionStats, ViaCounts,
     COMPACT_MAX_AGE_DAYS,
 };
 pub use doctor::{

@@ -21,7 +21,7 @@ archive_collisions = "an active note shadows the archived note with the same log
 
 [ranking]
 match_score = "each backend result page normalizes its native score to 0.0..=1.0 before merge; merged notes take the max component plus the both-stages bonus"
-frecency_multiplier = "derived from the access log (see 05-lifecycle.toml); recently/frequently retrieved notes rank higher"
+frecency_multiplier = "derived from the access log as read + 0.25 * search_hit (see 05-lifecycle.toml); recently/frequently retrieved notes rank higher"
 type_boosts = "small static boosts: preference and decision outrank session-summary at equal match score"
 prose_caveat = """
 fff scoring heuristics are code-tuned (definition classification, filename
@@ -38,7 +38,7 @@ per_result = [
   "namespace/slug (the handle for memory_read)",
   "title",
   "snippet: first matching line(s) with minimal context, not the whole body",
-  "why: one compact line, e.g. 'alias:shipping +frecency(6 reads/30d)' — explainable retrieval",
+  "why: one compact line, e.g. 'alias:shipping +frecency(3r+8s/30d)' — explainable retrieval",
   "score",
 ]
 overflow = "results beyond the budget are returned as bare slug+title lines under a 'more' key"
