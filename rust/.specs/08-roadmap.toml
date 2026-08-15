@@ -107,5 +107,5 @@ answer = "Do not add an import subcommand in v1. The source and destination are 
 [[open_question]]
 id = "OQ-5"
 q = "What happens to this repo? Proposal: new Rust workspace lives in rust/, Go tree and committed binaries removed once phase 1 dogfooding sticks."
-status = "AWAITING USER DECISION"
-answer = "Keep the legacy Go tree and committed binaries untouched until the user explicitly authorizes their deletion after real Phase 1 dogfooding."
+status = "RESOLVED 2026-08-15"
+answer = "The user authorized deletion. The Go tree, committed binaries, legacy databases, launcher, and architecture diagrams were removed across commits d996784..HEAD on refactor/rust (binaries, Go source, launcher/data, docs/diagrams, doc edits). Nothing was rewritten out of history: `main` is an ancestor of this branch and remains the recovery point — `git checkout main -- <path>` restores any deleted file, and the diagrams (which never existed on `main`) are recoverable via `git show 7599f0e:diagrams/<file>`. Reclaiming the ~101.7 MB of blobs still in the pack files would require a history rewrite and is deliberately deferred until after refactor/rust merges."

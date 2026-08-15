@@ -18,7 +18,7 @@
 - `fff-search` stays pinned to `=0.10.3`, imports stay in `memory-index`, mode is `FFFMode::Ai`, DBs initialize before the picker, and picker read guards stay search-scoped.
 - New behavior follows TDD: add one focused failing test, run it and record the expected failure, implement the minimum, then rerun focused and affected tests.
 - No test requires network or Docker; no binary, `.index/`, or database file is committed.
-- Preserve the abandoned Go tree until OQ-5 receives an explicit destructive user decision; never extend or repair it.
+- ~~Preserve the abandoned Go tree until OQ-5 receives an explicit destructive user decision; never extend or repair it.~~ **Superseded 2026-08-15:** OQ-5 was resolved and the Go tree was deleted; `main` history is the recovery point.
 
 ---
 

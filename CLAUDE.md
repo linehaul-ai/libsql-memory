@@ -88,7 +88,6 @@ it carries the full API reference. Key facts:
 
 ## Legacy Code
 
-`src/plugin/` (Go), `bin/`, and the old plugin wiring are the abandoned predecessor. Do not
-extend or fix them; they exist only for reference until removed (spec 08, OQ-5). The
-predecessor's post-mortem is encoded in `00-overview.toml` `[lessons]` — read it before
-relaxing any invariant above.
+The Go + LibSQL + embeddings predecessor was removed on 2026-08-15; it remains recoverable
+from `main` history. Its post-mortem is encoded in `00-overview.toml` `[lessons]` — read it
+before relaxing any invariant above.
