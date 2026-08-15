@@ -150,8 +150,10 @@ impl Note {
     pub fn to_markdown(&self) -> Result<String> {
         self.frontmatter.validate()?;
         let yaml = serde_yaml::to_string(&self.frontmatter)?;
-        // serde_yaml adds a trailing newline; keep a single blank line after ---
-        let yaml = yaml.trim_end();
+        // serde_yaml adds a trailing newline; strip newlines only. `trim_end` would
+        // also eat Unicode whitespace belonging to the last field's value (U+00A0
+        // and friends), silently corrupting it on the way to disk.
+        let yaml = yaml.trim_end_matches('\n');
         let mut out = String::with_capacity(yaml.len() + self.body.len() + 16);
         out.push_str("---\n");
         out.push_str(yaml);
@@ -379,6 +381,39 @@ Related: [[docker-registry-auth]]
         fn full_frontmatter_markdown_round_trips(note in valid_note()) {
             let markdown = note.to_markdown().unwrap();
             prop_assert_eq!(Note::parse(&markdown).unwrap(), note);
+        }
+    }
+
+    /// Regression: `to_markdown` used to `trim_end()` serde_yaml's trailing
+    /// newline. That trims *Unicode* whitespace, so a last field ending in
+    /// U+00A0 (or U+2007, U+3000, …) lost that character on every write.
+    #[test]
+    fn trailing_unicode_whitespace_in_the_last_field_survives_a_round_trip() {
+        for suffix in ['\u{a0}', '\u{2007}', '\u{3000}'] {
+            let source = format!("session{suffix}");
+            let note = Note {
+                frontmatter: NoteFrontmatter {
+                    title: "Trailing whitespace".into(),
+                    aliases: vec!["nbsp".into(), "unicode space".into()],
+                    tags: vec![],
+                    note_type: NoteType::Fact,
+                    created: date(2026, 8, 15),
+                    updated: date(2026, 8, 15),
+                    expires: None,
+                    source: Some(source.clone()),
+                },
+                body: String::new(),
+            };
+
+            let markdown = note.to_markdown().unwrap();
+            let parsed = Note::parse(&markdown).unwrap();
+            assert_eq!(
+                parsed.frontmatter.source.as_deref(),
+                Some(source.as_str()),
+                "U+{:04X} was stripped from the last frontmatter field",
+                suffix as u32
+            );
+            assert_eq!(parsed, note);
         }
     }
 

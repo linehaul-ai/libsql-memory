@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc f41cf5be61fda18330784477bb1c1fa0867b4589e96f1d5dc65d07957072d4d6 # shrinks to note = Note { frontmatter: NoteFrontmatter { title: "0", aliases: ["¡", "!"], tags: [], note_type: Fact, created: 2000-01-01, updated: 2000-01-01, expires: None, source: Some("é\u{a0}") }, body: "" }
