@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
-        .nth(3)
+        .nth(2)
         .unwrap()
         .to_path_buf()
 }
@@ -60,7 +60,7 @@ fn package_is_portable_rust_fff_memory() {
                         "run",
                         "--quiet",
                         "--manifest-path",
-                        "${CLAUDE_PLUGIN_ROOT}/rust/Cargo.toml",
+                        "${CLAUDE_PLUGIN_ROOT}/Cargo.toml",
                         "--bin",
                         "fff-memory",
                         "--",
@@ -206,7 +206,7 @@ fn skill_and_commands_expose_only_the_five_tool_contract() {
     let doctor = read("commands/memory-doctor.md");
     assert!(doctor.contains("disable-model-invocation: true"));
     assert!(doctor.contains(
-        "Bash(cargo run --quiet --manifest-path \"${CLAUDE_PLUGIN_ROOT}/rust/Cargo.toml\" --bin fff-memory -- doctor --project \"${CLAUDE_PROJECT_DIR}\")"
+        "Bash(cargo run --quiet --manifest-path \"${CLAUDE_PLUGIN_ROOT}/Cargo.toml\" --bin fff-memory -- doctor --project \"${CLAUDE_PROJECT_DIR}\")"
     ));
     assert!(!doctor.contains("manifest-path *)"));
     assert!(doctor.contains("cargo run"));
@@ -229,9 +229,12 @@ fn skill_and_commands_expose_only_the_five_tool_contract() {
 }
 
 #[test]
-fn ci_runs_all_four_workspace_gates_from_rust() {
+fn ci_runs_all_four_workspace_gates_from_the_repo_root() {
     let ci = read(".github/workflows/ci.yml");
-    assert!(ci.contains("working-directory: rust"));
+    assert!(
+        !ci.contains("working-directory"),
+        "workspace is at the repo root; CI needs no working-directory"
+    );
     for gate in [
         "cargo fmt --all -- --check",
         "cargo test --workspace",

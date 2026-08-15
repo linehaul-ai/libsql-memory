@@ -5,7 +5,7 @@ infrastructure. Built in Rust on the [fff](https://github.com/dmtrKovalenko/fff)
 
 > **Status: Rust implementation complete; real-use acceptance in progress.** This repo
 > previously held a Go + LibSQL + embeddings implementation. See
-> [`rust/.specs/`](rust/.specs/) for the authoritative design and
+> [`.specs/`](.specs/) for the authoritative design and
 > [Why the rewrite](#why-the-rewrite) for the story.
 
 ## The idea: write smart, search cheap
@@ -58,7 +58,7 @@ that teaches the alias discipline good recall depends on.
 ## Workspace layout
 
 ```
-rust/
+.
 ├── .specs/              # design specs (TOML) — start here
 └── crates/
     ├── memory-core/     # note format, write path, access log, Retriever trait
@@ -74,12 +74,11 @@ unreachable, nothing could ever be stored — the database was found months late
 schema and zero rows. The redesign makes that failure impossible by construction: writes are
 plain file operations, search is a disposable cache over them, and the semantic burden moved to
 write time where an LLM is always present. The full post-mortem is encoded as `[lessons]` in
-[`rust/.specs/00-overview.toml`](rust/.specs/00-overview.toml).
+[`.specs/00-overview.toml`](.specs/00-overview.toml).
 
 ## Building
 
 ```bash
-cd rust
 cargo build --workspace
 cargo test --workspace
 ```

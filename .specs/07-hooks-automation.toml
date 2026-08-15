@@ -55,5 +55,5 @@ list = [
 [plugin_packaging]
 distribution = "Claude Code plugin: .mcp.json launches 'fff-memory serve'; hooks + skill + commands ship in the plugin directory"
 portability = "no absolute paths in any shipped config (predecessor's .mcp.json hardcoded /Users/fakebizprez/...); use ${CLAUDE_PLUGIN_ROOT} and a small launcher only if the variable cannot expand in args"
-mcp_server = "fff-memory; .mcp.json launches cargo run --quiet against ${CLAUDE_PLUGIN_ROOT}/rust/Cargo.toml and passes serve --project ${CLAUDE_PROJECT_DIR}"
+mcp_server = "fff-memory; .mcp.json launches cargo run --quiet against ${CLAUDE_PLUGIN_ROOT}/Cargo.toml and passes serve --project ${CLAUDE_PROJECT_DIR}"
 hook_context = "For non-empty matches, memory_search keeps structuredContent and prefixes text content with 'Memory context:' so direct MCP hooks inject context instead of parsing the JSON text as a hook decision. Empty responses remain JSON and inject no noise."

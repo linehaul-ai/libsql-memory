@@ -6,7 +6,7 @@
         "run",
         "--quiet",
         "--manifest-path",
-        "${CLAUDE_PLUGIN_ROOT}/rust/Cargo.toml",
+        "${CLAUDE_PLUGIN_ROOT}/Cargo.toml",
         "--bin",
         "fff-memory",
         "--",

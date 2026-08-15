@@ -8,7 +8,7 @@ This repo has been rebuilt as **fff-memory** (working name): a persistent agent 
 Claude Code, written in Rust around the [fff](https://github.com/dmtrKovalenko/fff) search
 engine. The previous Go + LibSQL + embeddings implementation is abandoned.
 
-**The specs in `rust/.specs/*.toml` are the authoritative design.** Read the relevant spec
+**The specs in `.specs/*.toml` are the authoritative design.** Read the relevant spec
 before implementing anything; update the spec when a decision changes.
 
 | Spec | Covers |
@@ -39,8 +39,11 @@ external dependencies. Non-negotiable invariants:
 
 ## Workspace Layout (per spec 06)
 
+The Cargo workspace is the repository: `Cargo.toml` sits at the repo root alongside the plugin
+wiring (`.mcp.json`, `hooks/`, `skills/`, `commands/`).
+
 ```
-rust/
+.
 ├── .specs/                  # authoritative design (TOML)
 └── crates/
     ├── memory-core/         # note format, atomic store, access log, Retriever trait
@@ -51,7 +54,7 @@ rust/
 
 ## Build & Development Commands
 
-Run from `rust/`:
+Run from the repo root:
 
 ```bash
 cargo build --workspace

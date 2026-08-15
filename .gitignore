@@ -1,6 +1,7 @@
 .DS_Store
+/target/
+**/.index/
 *.db
 *.db-wal
 *.db-shm
-.index/
 .claude/settings.local.json
