@@ -1,0 +1,110 @@
+## Top AI Memory Layers
+
+The architecture of memory in AI agents has converged around a cognitive-science-inspired taxonomy that extends far beyond simple "long-term vs. short-term" distinctions. As of 2026, the field is organized around multiple specialized memory layers, each serving distinct functions in enabling agents to maintain continuity, learn from experience, and behave intelligently across sessions.
+
+### The Core Four Memory Types
+
+The foundational taxonomy, formalized by the **CoALA framework** from Princeton ([arXiv:2309.02427](https://arxiv.org/abs/2309.02427)) and widely adopted across the industry, identifies four primary memory types that map directly to human cognitive architecture:
+
+**Working (In-Context) Memory** serves as the agent's active scratchpad — the context window containing the current session's system prompt, conversation history, retrieved chunks, and tool outputs. [Atlan's analysis](https://atlan.com/know/types-of-ai-agent-memory/) notes this is the only memory the LLM directly reasons over; all other types must be retrieved into this window to influence generation. Letta's architecture treats this as "RAM" versus external storage as "disk," with agents moving data between tiers via tool calls. The critical challenge here is not window size but *curation*: the "lost-in-the-middle" effect can degrade accuracy 30–50% on facts buried in long contexts.
+
+**Episodic Memory** stores time-indexed records of past events and interactions — the agent's "diary." As documented in [research from February 2026](https://arxiv.org/pdf/2502.06975), episodic reflection and consolidation (converting past events into compact, reusable representations) is considered "the key mechanism for long-term reasoning." Implementations like Letta's Recall Memory and Mem0's Episodic API store events with timestamps using hybrid vector-plus-graph retrieval. The design rule is to store *summaries, not transcripts* — raw conversation storage produces retrieval noise.
+
+**Semantic Memory** holds factual knowledge, definitions, and accumulated world knowledge independent of specific experiences. This layer answers "what is true" rather than "what happened." [Mem0's research paper](https://arxiv.org/abs/2504.19413) benchmarks its semantic memory layer at 91% lower p95 latency and 90% token cost savings versus naive context stuffing. Storage typically uses vector databases (Pinecone, Weaviate) or knowledge graphs, with retrieval by entity identity rather than pure similarity.
+
+**Procedural Memory** encodes skills, rules, and behavioral instructions — the "how to act" layer. This lives in system prompts, tool definitions, routing logic, and LLM weights. As noted in [cognitive architecture analyses](https://www.syntharatechnologies.com/blog/agent-memory-architectures), procedural memory is "the most under-theorised of the four types, which is ironic. It governs everything the agent does." Enterprise deployments require these procedures to be versioned and centrally managed rather than hard-coded per agent.
+
+### Extended and Emerging Layers
+
+Beyond the core four, 2026 architectures increasingly incorporate additional specialized layers:
+
+**Identity/Persona Memory** maintains stable self-representation across interactions. The [Portable Agent Memory protocol](https://arxiv.org/pdf/2605.11032) explicitly includes identity as a distinct component ($M = (E, S, P, W, I)$ spanning episodic, semantic, procedural, working, and identity memory), enabling consistent agent behavior and user recognition across heterogeneous systems.
+
+**Organizational/Context Memory** represents a fifth type increasingly recognized for enterprise deployments. [Atlan's framework](https://atlan.com/know/types-of-ai-agent-memory/) identifies this as "governed organizational context memory" — certified business definitions, column-level lineage, cross-system entity identity, and machine-enforceable access policies. This is distinct from semantic memory because governance state requires version history, approval workflows, and runtime enforcement mechanisms that flat fact stores cannot provide.
+
+**Biologically-Grounded Lifecycle Layers** are emerging from research into human-inspired architectures. A [May 2026 paper from Microsoft researchers](https://arxiv.org/html/2605.08538v1) proposes six cognitive mechanisms mapped to system components: sleep-phase consolidation, interference-based forgetting, engram maturation, reconsolidation upon retrieval, entity knowledge graphs, and hybrid multi-cue retrieval. Their evaluation on a VSCode issue-tracking dataset achieved 97.2% retention precision with 58% store reduction through deduplication-based consolidation.
+
+### Leading Framework Implementations
+
+The theoretical layers are implemented through several production frameworks that have emerged as leaders in 2026:
+
+| Framework | Primary Focus | Memory Architecture |
+|-----------|--------------|---------------------|
+| **Mem0** | Universal memory layer | Episodic + semantic + procedural APIs; hybrid vector/graph retrieval; ~48K GitHub stars as of mid-2026 ([Zylos research](https://zylos.ai/research/2026-04-05-ai-agent-memory-architectures-persistent-knowledge/)) |
+| **Letta** (formerly MemGPT) | OS-style memory management | Core/Recall/Archival three-tier; agent self-manages memory via tool calls; treats context window as RAM |
+| **Zep** | Temporal knowledge graphs | Memory as temporal knowledge graph enabling cross-session, time-aware reasoning |
+| **Cognee** | Graph-native persistence | Full knowledge graph construction before queries; combines graph structure with RAG |
+| **LangMem** | Modular framework | Multiple memory types with hot-path and background extraction modes |
+
+### Hierarchical Storage Tiers
+
+Production implementations typically organize memory into three physical tiers mirroring biological memory systems: **short-term hot cache** (in-memory with TTL minutes-to-hours, analogous to prefrontal cortex), **medium-term warm episodic store** (full fidelity with TTL days-to-weeks, analogous to hippocampus), and **long-term semantic graph** (permanent structured knowledge, analogous to neocortex). Retrieval prioritizes recent episodic memories while semantic knowledge accumulates through consolidation processes.
+
+The [Agentic Memory (AgeMem) framework](https://arxiv.org/pdf/2601.01885) from Wuhan University and Alibaba Group advances this by unifying long-term and short-term management through reinforcement learning, exposing memory operations (ADD, UPDATE, DELETE, RETRIEVE, SUMMARY, FILTER) as tool-based actions the agent learns to invoke optimally. Their experiments across five long-horizon benchmarks demonstrate that unified memory management consistently outperforms static heuristic approaches.
+
+### Critical Design Principles
+
+Across all layers, several principles have emerged as essential: **deliberate memory writes** rather than automatic logging prevent compounding errors; **consolidation pipelines** that deduplicate and verify are "the difference between an agent that gets smarter and one that gets weirder"; **decay mechanisms** ensure older memories contribute less to retrieval; and **governance infrastructure** separates enterprise context layers from simple memory retrieval architectures.
+
+## Glean, Claude Memory, and Basic Memory: How They Compare
+
+The AI memory landscape in 2026 extends well beyond open-source frameworks into enterprise platforms, consumer chatbot features, and specialized developer tools. Here is how the specific systems you asked about fit into the broader memory architecture taxonomy.
+
+### Glean: Enterprise Search as Memory Foundation
+
+**Glean** is not primarily a memory framework in the agentic sense — it is a **workplace AI platform** that has expanded from enterprise search into agent orchestration, with memory serving as a workflow-tracking mechanism rather than persistent agent cognition. As described in [Glean's own documentation](https://docs.glean.com/agents/concepts/memory), memory within Glean agents functions as "a notebook that your agent uses to store inputs, outputs, and important information from each step" during workflow execution. This is **procedural/episodic memory scoped to a single agent run**, not long-term cross-session knowledge accumulation.
+
+The architecture is token-centric: each step stores outputs automatically, and subsequent steps can access "all previous steps," "previous step only," or "no prior step outputs" depending on configuration. [Glean's agent builder](https://docs.glean.com/agents/concepts/memory) allows manual referencing via `[[ ]]` syntax to pass specific data downstream, optimizing for token efficiency. Memory persists for up to two hours after conversation history is turned off, available only for follow-up tools.
+
+Critically, Glean's competitive moat lies in its **Enterprise Graph** — a permissions-aware index across 100+ connectors (Slack, Salesforce, Jira, SharePoint, etc.) that understands organizational hierarchy, document access controls, and content freshness. [A June 2026 HPCWire report](https://www.hpcwire.com/aiwire/2026/06/11/glean-workers-say-ai-saves-11-hours-a-week-but-lack-of-context-is-eating-gains/) based on a Glean Work AI Institute survey of 6,000 workers found that while AI saves 11 hours weekly, "lack of context is eating gains" — with workers spending 6.4 hours per week "botsitting" (feeding context, checking outputs, debugging errors). This context gap is precisely what Glean's connector ecosystem addresses.
+
+However, [Reddit user evaluations](https://www.reddit.com/r/SaaS/comments/1tnz9lm/we_evaluated_glean_60x_and_guru_for_internal/) from May 2026 note that Glean's "context layer" is "not actually a knowledge graph — it's a vector DB," which has "massive limitations for the amount of reasoning and business context that can be stored." Another [Reddit analysis](https://www.reddit.com/r/ArtificialInteligence/comments/1t2ihou/will_enterprise_search_startups_like_glean/) observed that Glean is "excellent at the part you accurately said is getting squeezed, enterprise search, but bad at the context layer."
+
+Glean's memory is best understood as **organizational working memory** — ephemeral context assembled for specific tasks from a vast indexed corpus — rather than the kind of persistent, learning agent memory that frameworks like Mem0 or Zep provide. Pricing runs approximately $50/user/month with $60K minimum annual agreements, placing it firmly in the enterprise tier.
+
+### Claude Memory: Three-Layer Consumer/Developer Architecture
+
+**Anthropic's Claude memory system** operates across three distinct layers with different scopes, audiences, and persistence models. [Shareuhack's detailed guide](https://www.shareuhack.com/en/posts/claude-memory-feature-guide-2026) documents this architecture comprehensively.
+
+**Layer 1: Chat Memory** is the consumer-facing feature available to all plans since March 2026. It uses "Memory Synthesis" — extractive summarization, not RAG — where Claude processes conversations roughly every 24 hours and distills "long-term-worthy information" (profession, language preferences, frequently used tools) into a Memory profile loaded into future conversations. [Reddit users note](https://www.reddit.com/r/ClaudeAI/comments/1r26f1c/claude_memory_vs_chatgpt_memory_from_daily_use/) that Claude "generates a memory file every day from your latest chats, which includes stable long term data, latest context, and anything you've asked explicitly to be remembered." This is **episodic memory with automated consolidation**.
+
+A key differentiator is **Project Memory** — isolated memory spaces per Project, so work and personal contexts do not intermingle. [One Reddit user](https://www.reddit.com/r/ClaudeAI/comments/1rjlf0l/claudes_chat_memory_compared_to_chatgpt/) observed that "Claude segments memory by project... I actually noticed that in a way, I get more depth discussing within a project." This is a deliberate architectural choice contrasting with ChatGPT's global memory approach.
+
+**Layer 2: Claude Code Memory** serves developers through two complementary mechanisms. **CLAUDE.md** is a manually authored rules file (project, personal, or organizational scope) loaded at session start, functioning as **procedural memory** for coding standards and project conventions. [Best practice guidance](https://www.shareuhack.com/en/posts/claude-memory-feature-guide-2026) suggests keeping it under 200 lines and using `.claude/rules/` for modular management. **Auto Memory** (`~/.claude/projects/<project>/memory/MEMORY.md`) is automatically maintained by Claude, capturing preferences and patterns learned from interactions — **adaptive episodic memory** capped at 200 lines. [Milvus's analysis of leaked source code](https://milvus.io/blog/claude-code-memory-memsearch.md) reveals that Auto Memory organizes notes into four categories: user, feedback, project, and reference.
+
+A background **Auto Dream** process consolidates stale memories (replacing vague time references with dates, resolving contradictions, deleting entries referencing deleted files) when more than 24 hours have passed and at least 5 new sessions accumulated. The leaked code also revealed **KAIROS**, an unreleased always-on daemon mode that would watch projects continuously, check in on timers, and push files or notifications — essentially **persistent ambient memory**.
+
+**Layer 3: API Memory Tool** (`memory_20250818`) enables developers building on Anthropic's API to manage persistent cross-session memory within their own applications, supporting six operations (view, create, str_replace, insert, delete, rename). As of May 2026, **Managed Agents** added built-in workspace-scoped memory with immutable versioning, plus **Dreaming** — a scheduled curation process where agents review up to 100 past sessions, extract patterns, merge duplicates, and write "playbooks." [Anthropic reported](https://www.shareuhack.com/en/posts/claude-memory-feature-guide-2026) that legal AI company Harvey saw task completion rates increase roughly 6x after implementing Dreaming.
+
+**Claude's memory is portable** — in April 2026, Anthropic made memory free for all users and added [import/export capabilities](https://support.claude.com/en/articles/12123587-import-and-export-your-memory-from-claude) allowing migration from ChatGPT, Gemini, and Grok. [Tom's Guide reported](https://www.tomsguide.com/ai/you-can-move-your-chatgpt-memory-to-claude-in-60-seconds-heres-how) that ChatGPT memory can be transferred "in about 60 seconds."
+
+### Basic Memory: Local-First Open Source Simplicity
+
+**Basic Memory** is an open-source, local-first AI memory system designed for simplicity and privacy. [A Reddit post from the selfhosted community](https://www.reddit.com/r/selfhosted/comments/1lupg4n/basic_memory_an_open_source_local_first_ai_memory/) describes it as "completely self-contained. No external dependencies for data storage, no API keys for the memory system itself, no cloud services required." It represents a minimalist alternative to the complexity of enterprise frameworks.
+
+The core philosophy is **portable personal memory** — your context belongs to you, not the platform. [A Reddit discussion in r/AIMemory](https://www.reddit.com/r/AIMemory/comments/1r2wvt8/ai_memory_is_going_to_be_the_next_big_lockin_and/) highlighted a tool (likely Basic Memory or a similar project) that "takes your conversation exports from ChatGPT, Claude, or Gemini and creates a portable memory file you can load into any AI that accepts file uploads... Everything processes in your browser, nothing gets uploaded to a server."
+
+Basic Memory occupies a distinct niche in the memory taxonomy: **consumer-grade, privacy-preserving, cross-platform context portability**. It does not attempt the sophisticated retrieval architectures of Mem0 or Zep, nor the enterprise connector depth of Glean. Instead, it solves the lock-in problem — the frustration of "re-explaining your entire project to a new chat window" when switching between AI platforms.
+
+### Comparative Positioning
+
+| System | Memory Type | Scope | Persistence | Architecture |
+|--------|-------------|-------|-------------|--------------|
+| **Glean** | Organizational working memory | Enterprise workflows | ~2 hours post-session | Token-managed step outputs |
+| **Claude Chat Memory** | Episodic + semantic | Consumer cross-chat | Permanent (until deleted) | Daily synthesis summaries |
+| **Claude Code Memory** | Procedural + adaptive episodic | Developer projects | Local files, 200-line cap | CLAUDE.md rules + Auto Memory notes |
+| **Claude API Memory** | Programmable persistent | Application users | Developer-controlled | File-based with CRUD operations |
+| **Basic Memory** | Portable personal context | Cross-platform consumer | User-controlled export | Browser-local, file-based |
+
+### Where They Fit in the Broader Landscape
+
+These three systems illustrate the **segmentation of AI memory in 2026**. Glean represents the **enterprise retrieval layer** — memory as assembled context from organizational data, not learned experience. Claude represents the **platform-native personal layer** — memory as user profile and project continuity, with increasing sophistication from consumer chat through developer tooling to managed enterprise agents. Basic Memory represents the **anti-lock-in portability layer** — memory as user-owned data that transcends any single platform.
+
+The frontier research frameworks (Mem0, Zep, Letta, Cognee) occupy a different category entirely: **agent-native memory infrastructure** designed for autonomous systems that read, write, and reason about their own memory. Glean, Claude, and Basic Memory are primarily **consumers** of memory architecture rather than **architectures for memory-capable agents**. The distinction matters because true agentic memory requires the agent to manage its own memory lifecycle — deciding what to store, when to consolidate, how to retrieve, and what to forget. Glean's agents do not learn from experience across sessions; Claude's Chat Memory synthesizes but does not self-modify; Basic Memory transfers but does not autonomously curate.
+
+The [Portable Agent Memory protocol](https://arxiv.org/pdf/2605.11032) proposed in 2026 aims to bridge these worlds by standardizing how episodic, semantic, procedural, working, and identity memory can be exchanged between heterogeneous systems. If adopted, it would enable Basic Memory-style portability with Mem0-style retrieval depth, potentially collapsing the distinction between platform-native and cross-platform memory layers.
+
+
+<MUST_READ>
+https://www.letta.com/blog/context-repositories/
+</MUST_READ>

@@ -1,0 +1,143 @@
+# Spec 09 — Scratchpad
+# Raw transcripts -> analysis -> memories. A TUI to inspect both ends.
+
+[spec]
+id = "scratchpad"
+version = "0.2.0"
+status = "draft"
+date = "2026-08-16"
+
+[thesis]
+flow = "raw chat transcripts -> analyzed for memories -> official memories written"
+why = """
+The session agent is the worst judge of its own session: it overvalues effort it
+spent and cannot see its own corrections as corrections, having already absorbed
+them. A separate reviewer reading the finished transcript sees what the
+participant structurally cannot. Running it out of band, over completed
+transcripts, means it can never collide with a live session.
+"""
+visible = """
+Both ends are inspectable, so the filter is tunable by looking at it rather than
+by guessing. Every memory traces back to the chat that produced it.
+"""
+
+[raw]
+what = "Claude Code's own session transcripts — one JSONL per chat, already on disk"
+where = "${CLAUDE_CONFIG_DIR:-~/.claude}/projects/<project-slug>/"
+rule = "read-only view. We never write, move, or delete them. There is no capture step."
+boundary = "RAW sits outside the memory root; the scratchpad opens transcripts read-only and no other crate gets transcript access"
+
+[memories]
+what = "ordinary memories per spec 01 — the judge writes nothing special-cased"
+storage = "topical namespaces, unchanged"
+grouping = """
+Per-chat grouping is a VIEW, not a layout. Memories are stored topically and
+rendered grouped by their `source` field. Storing them under the originating
+chat would key location by WHEN instead of WHAT, and spec 02's dedup probe
+(namespace-scoped) would never fire across sessions.
+"""
+source = "`session <uuid>`, matching the transcript filename — the join between the two tiers"
+
+[judge]
+input = "the whole transcript, unmodified"
+context = """
+Requires a 1M-context model (Gemini Flash Lite and equivalents). At that size the
+raw transcript fits — this project's largest sessions are ~1.2 MB, roughly 300k
+tokens — so there is no stripping, chunking, or multi-pass logic. Send the file.
+"""
+transport = "OpenAI-compatible chat completions; model is a base-URL and name swap (Groq, Gemini, OpenAI, local Ollama)"
+placement = "upstream of memory_store, which keeps spec 02's invariants untouched. The judge decides whether to call it, never how it works."
+fail_open = "unreachable, timed out, or malformed = nothing is written and the session is unaffected. Never blocks, never delays."
+scheduling = "out of band, queued on Stop and PreCompact, over completed transcripts only"
+egress = """
+EXPLICIT OPT-IN, no default endpoint. Transcripts carry source, scrollback, and
+client work; today they reach Anthropic by the user's choice of Claude Code, and
+a third party is a new decision. A local model keeps zero egress.
+"""
+confinement = "all network code lives in memory-judge; memory-core does not depend on it, so the zero-network invariant stays enforceable by the dependency graph"
+ledger = """
+.index/reviewed.json records which sessions were analyzed and how many memories
+each produced. Needed because a chat that correctly yielded nothing is otherwise
+indistinguishable from one never read — and the zero-count entries are exactly
+what shows whether the rules are too strict.
+"""
+
+[judge.rules]
+layers = "a global ruleset applies everywhere; an optional per-project file drills down. No project file is the normal case."
+global_path = "${XDG_CONFIG_HOME:-~/.config}/fff-memory/judge.toml"
+project_path = "<memory root>/judge.toml"
+global_owns = ["what counts as memory-worthy", "sentiment rules", "the never-store floor: secrets, credentials, routine activity", "alias quality per spec 01"]
+project_owns = ["extra events in this codebase's vocabulary", "suppression of named global rules", "path and topic exclusions", "default namespace"]
+merge = "project extends global, may suppress named rules and narrow scope, may not relax the never-store floor"
+
+[judge.criteria]
+principle = """
+Ask for observation, not evaluation. 'Was this important?' is judgment, which
+small models do badly — they over-produce, the exact failure this design exists
+to prevent. 'Did the user correct the model?' is pattern recognition, which they
+do well.
+"""
+events = [
+  "user corrected the model, especially twice on the same point -> feedback",
+  "user stated a preference, constraint, or convention -> preference",
+  "a decision was made and a reason given -> decision",
+  "an approach was tried and abandoned, with the reason -> lesson",
+  "a durable project fact not derivable from the repo -> fact",
+]
+sentiment = """
+Sentiment marks WHERE to look: correction, the same correction repeating,
+explicit confirmation, prohibitions ('never', 'always', 'don't'), and visible
+frustration. Repetition and prohibition weigh most; a lone confirmation is not
+enough to write anything. It marks the moment — the memory's content still comes
+from the substance of the exchange.
+"""
+
+[judge.history]
+requirement = "the judge sees current memories, their update history, and what was archived or deleted"
+why = [
+  "dedup — update an existing handle instead of re-deriving a stored fact",
+  "no resurrection — deleting a memory is the user saying they do not want it; a judge blind to deletions undoes that decision every session",
+  "reinforcement — a fact re-established in a later session is evidence the memory is right, not a reason to write a second copy",
+]
+sources = "memory root, .archive/, and the access log (spec 05)"
+
+[tui]
+toolkit = "ratatui — terminal UI, no browser, no socket, no daemon"
+hierarchy = "PROJECTS -> { RAW | MEMORIES } -> per-chat"
+navigation = "only the two tier labels are real tabs; the chat level is a filterable, recency-ordered list"
+does = ["read a transcript", "read the memories it produced and jump between them", "see chats that produced nothing — the signal for tuning rules", "edit or delete a memory"]
+never = "RAW is not editable, and the TUI is not an approval gate — memories are live when written. Requiring a click reintroduces the manual curation this project rejected, because people forget."
+launch = "fff-memory scratchpad"
+
+[crates]
+new = [
+  "memory-judge (lib) — transcript reading, OpenAI-compatible client, memory emission. The only crate with network access.",
+  "memory-tui (lib) — ratatui views over both tiers.",
+]
+wiring = "both wired into the existing binary; one binary preserved"
+
+[supersedes]
+note = "where this conflicts with an earlier spec, this wins and the earlier text gets rewritten"
+changes = [
+  "00: the no-server rule covers sockets and daemons; a local TUI is in scope",
+  "01: `source` format fixed to `session <uuid>`",
+  "04: CLI gains `scratchpad`; the command list is not closed (the five-tool MCP limit is untouched — subcommands are not tools)",
+  "06: workspace gains crates/memory-judge and crates/memory-tui",
+  "07: the Stop hook agent becomes an enqueue; PreCompact added as a second enqueue point",
+]
+
+[testing]
+policy = [
+  "memory-judge: parsing against checked-in JSONL fixtures; the LLM client behind a trait with a fake — no test needs network",
+  "fail-open regressions: unreachable, timeout, and malformed response each leave the store byte-identical",
+  "a test asserts memory-core's dependency graph excludes memory-judge",
+  "a test asserts no code path opens a transcript for writing",
+]
+
+[open_questions]
+oq_1 = """
+One session per analysis, or a batch? Per-session keeps a clean link from memory
+to chat. Batching is where the reviewer's edge is largest — the same correction
+recurring across five sessions is the strongest signal a rule is missing, and it
+is invisible one at a time. Decide by dogfooding.
+"""

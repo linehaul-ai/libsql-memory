@@ -55,6 +55,25 @@ One Rust binary, both an MCP stdio server and a CLI, embedding the `fff-search` 
 Thin Claude Code hooks (session start, prompt submit, session end) plus a `memory-usage` skill
 that teaches the alias discipline good recall depends on.
 
+## Install
+
+The repository doubles as the Claude Code plugin — the plugin root and the repo root are the
+same directory, so there is nothing to build or package separately:
+
+```bash
+git clone https://github.com/linehaul-ai/libsql-memory.git
+claude plugin marketplace add ./libsql-memory
+```
+
+Then enable `fff-memory` from `/plugin`. That registers the MCP server, the two slash commands
+(`/memory-status`, `/memory-doctor`), the three hooks, and the `memory-usage` skill in one step.
+The server compiles on first launch via `cargo run`, so a Rust toolchain is the only
+prerequisite.
+
+Pre-approve the `mcp__plugin_fff-memory_fff-memory__memory_store` permission if you want the
+session-end hook to record memories without prompting; without it the hook skips rather than
+blocking.
+
 ## Workspace layout
 
 ```

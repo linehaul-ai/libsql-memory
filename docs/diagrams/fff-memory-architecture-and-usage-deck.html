@@ -1,0 +1,1414 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>fff-memory — Architecture & Usage Guide</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400;1,600&display=swap" rel="stylesheet">
+<style>
+  /* ============ THEME: Deep Slate & Technical Sky ============ */
+  :root {
+    --font-body: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --font-mono: 'JetBrains Mono', 'SF Mono', Consolas, monospace;
+    --bg: #090d16;
+    --surface: #101626;
+    --surface2: #162035;
+    --surface-elevated: #1d2b47;
+    --border: rgba(148, 163, 184, 0.12);
+    --border-bright: rgba(56, 189, 248, 0.28);
+    --text: #f1f5f9;
+    --text-dim: #94a3b8;
+    --accent: #38bdf8;
+    --accent-dim: rgba(56, 189, 248, 0.12);
+    --gold: #fbbf24;
+    --gold-dim: rgba(251, 191, 36, 0.12);
+    --green: #34d399;
+    --green-dim: rgba(52, 211, 153, 0.12);
+    --red: #f87171;
+    --red-dim: rgba(248, 113, 113, 0.12);
+    --purple: #c084fc;
+    --purple-dim: rgba(192, 132, 252, 0.12);
+    --code-bg: #060911;
+    --code-text: #e2e8f0;
+  }
+
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f8fafc;
+      --surface: #ffffff;
+      --surface2: #f1f5f9;
+      --surface-elevated: #ffffff;
+      --border: rgba(15, 23, 42, 0.08);
+      --border-bright: rgba(2, 132, 199, 0.25);
+      --text: #0f172a;
+      --text-dim: #64748b;
+      --accent: #0284c7;
+      --accent-dim: rgba(2, 132, 199, 0.08);
+      --gold: #d97706;
+      --gold-dim: rgba(217, 119, 6, 0.08);
+      --green: #059669;
+      --green-dim: rgba(5, 150, 105, 0.08);
+      --red: #dc2626;
+      --red-dim: rgba(220, 38, 38, 0.08);
+      --purple: #9333ea;
+      --purple-dim: rgba(147, 51, 234, 0.08);
+      --code-bg: #1e293b;
+      --code-text: #f8fafc;
+    }
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: var(--font-body);
+    color: var(--text);
+    background: var(--bg);
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ============ DECK ENGINE ============ */
+  .deck {
+    height: 100dvh;
+    overflow-y: auto;
+    scroll-snap-type: y mandatory;
+    scroll-behavior: smooth;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .slide {
+    height: 100dvh;
+    scroll-snap-align: start;
+    overflow: hidden;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: clamp(36px, 5vh, 72px) clamp(36px, 6vw, 100px);
+    isolation: isolate;
+    opacity: 0;
+    transform: translateY(32px) scale(0.985);
+    transition:
+      opacity 0.5s cubic-bezier(0.16, 1, 0.3, 1),
+      transform 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .slide.visible {
+    opacity: 1;
+    transform: none;
+  }
+
+  .slide .reveal {
+    opacity: 0;
+    transform: translateY(18px);
+    transition:
+      opacity 0.45s cubic-bezier(0.16, 1, 0.3, 1),
+      transform 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .slide.visible .reveal { opacity: 1; transform: none; }
+  .slide.visible .reveal:nth-child(1) { transition-delay: 0.08s; }
+  .slide.visible .reveal:nth-child(2) { transition-delay: 0.16s; }
+  .slide.visible .reveal:nth-child(3) { transition-delay: 0.24s; }
+  .slide.visible .reveal:nth-child(4) { transition-delay: 0.32s; }
+  .slide.visible .reveal:nth-child(5) { transition-delay: 0.40s; }
+  .slide.visible .reveal:nth-child(6) { transition-delay: 0.48s; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .slide, .slide .reveal {
+      opacity: 1 !important;
+      transform: none !important;
+      transition: none !important;
+    }
+  }
+
+  /* ============ NAV CHROME ============ */
+  .deck-progress {
+    position: fixed; top: 0; left: 0; height: 3px;
+    background: linear-gradient(90deg, var(--accent), var(--green));
+    z-index: 100; transition: width 0.3s ease; pointer-events: none;
+  }
+
+  .deck-dots {
+    position: fixed; right: clamp(12px, 1.8vw, 24px); top: 50%;
+    transform: translateY(-50%); display: flex; flex-direction: column;
+    gap: 7px; z-index: 100; padding: 7px 5px;
+    background: color-mix(in srgb, var(--bg) 75%, transparent 25%);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  }
+
+  .deck-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--text-dim); opacity: 0.3; border: none; padding: 0;
+    cursor: pointer; transition: opacity 0.2s ease, transform 0.2s ease, background 0.2s ease;
+  }
+  .deck-dot:hover { opacity: 0.7; }
+  .deck-dot.active { opacity: 1; transform: scale(1.6); background: var(--accent); }
+
+  .deck-counter {
+    position: fixed; bottom: clamp(12px, 2vh, 20px); right: clamp(12px, 2vw, 24px);
+    font-family: var(--font-mono); font-size: 11px; color: var(--text-dim);
+    z-index: 100; font-variant-numeric: tabular-nums;
+    background: color-mix(in srgb, var(--bg) 70%, transparent 30%);
+    padding: 4px 10px; border-radius: 6px; border: 1px solid var(--border);
+    backdrop-filter: blur(4px);
+  }
+
+  .deck-hints {
+    position: fixed; bottom: clamp(12px, 2vh, 20px); left: 50%;
+    transform: translateX(-50%); font-family: var(--font-mono);
+    font-size: 11px; color: var(--text-dim); opacity: 0.7; z-index: 100;
+    transition: opacity 0.5s ease; white-space: nowrap;
+    background: color-mix(in srgb, var(--bg) 70%, transparent 30%);
+    padding: 4px 12px; border-radius: 6px; border: 1px solid var(--border);
+    backdrop-filter: blur(4px);
+  }
+  .deck-hints.faded { opacity: 0; pointer-events: none; }
+
+  /* ============ SHARED TYPOGRAPHY & ELEMENTS ============ */
+  .slide__display {
+    font-size: clamp(40px, 7.5vw, 84px);
+    font-weight: 800;
+    letter-spacing: -2px;
+    line-height: 1.05;
+    text-wrap: balance;
+  }
+
+  .slide__heading {
+    font-size: clamp(26px, 4.2vw, 44px);
+    font-weight: 700;
+    letter-spacing: -0.8px;
+    line-height: 1.15;
+    text-wrap: balance;
+    margin-bottom: clamp(10px, 1.8vh, 20px);
+  }
+
+  .slide__body {
+    font-size: clamp(15px, 1.8vw, 20px);
+    line-height: 1.6;
+    color: var(--text-dim);
+    text-wrap: pretty;
+  }
+
+  .slide__subtitle {
+    font-family: var(--font-mono);
+    font-size: clamp(13px, 1.4vw, 17px);
+    color: var(--text-dim);
+    letter-spacing: 0.5px;
+  }
+
+  .slide__label {
+    font-family: var(--font-mono);
+    font-size: clamp(10px, 1.1vw, 13px);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--accent);
+    margin-bottom: 10px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .slide__label::before {
+    content: '';
+    display: inline-block;
+    width: 8px; height: 8px;
+    border-radius: 2px;
+    background: var(--accent);
+  }
+
+  .slide__label--gold { color: var(--gold); }
+  .slide__label--gold::before { background: var(--gold); }
+  .slide__label--green { color: var(--green); }
+  .slide__label--green::before { background: var(--green); }
+
+  /* Accent Badges */
+  .badge {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+  }
+  .badge--cyan { background: var(--accent-dim); color: var(--accent); border: 1px solid var(--accent); }
+  .badge--gold { background: var(--gold-dim); color: var(--gold); border: 1px solid var(--gold); }
+  .badge--green { background: var(--green-dim); color: var(--green); border: 1px solid var(--green); }
+  .badge--red { background: var(--red-dim); color: var(--red); border: 1px solid var(--red); }
+
+  /* ============ SLIDE TYPE: TITLE ============ */
+  .slide--title {
+    align-items: center;
+    text-align: center;
+    background-image: radial-gradient(circle at 50% 35%, rgba(56, 189, 248, 0.12) 0%, transparent 60%);
+  }
+  .slide--title .slide__display {
+    background: linear-gradient(135deg, #ffffff 40%, var(--accent) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  /* ============ SLIDE TYPE: DIVIDER ============ */
+  .slide--divider {
+    justify-content: center;
+    background-image: radial-gradient(ellipse at 80% 50%, var(--accent-dim) 0%, transparent 50%);
+  }
+  .slide--divider .slide__number {
+    font-family: var(--font-mono);
+    font-size: clamp(90px, 20vw, 220px);
+    font-weight: 800;
+    line-height: 0.8;
+    opacity: 0.05;
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    color: var(--accent);
+  }
+
+  /* ============ SLIDE TYPE: CONTENT & ASYMMETRIC ============ */
+  .slide--content .slide__inner {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr;
+    gap: clamp(24px, 4vw, 56px);
+    align-items: center;
+    width: 100%;
+  }
+
+  .slide__bullets {
+    list-style: none;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: clamp(10px, 1.8vh, 18px);
+  }
+
+  .slide__bullets li {
+    padding-left: 28px;
+    position: relative;
+    font-size: clamp(15px, 1.8vw, 19px);
+    line-height: 1.5;
+    color: var(--text-dim);
+  }
+
+  .slide__bullets li strong { color: var(--text); }
+
+  .slide__bullets li::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 10px;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent);
+  }
+
+  .card-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: clamp(18px, 3vh, 32px);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  /* ============ SLIDE TYPE: SPLIT ============ */
+  .slide--split { padding: 0; }
+  .slide--split .slide__panels {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    height: 100%;
+  }
+  .slide--split .slide__panel {
+    padding: clamp(36px, 5vh, 72px) clamp(32px, 4vw, 64px);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: clamp(12px, 2vh, 20px);
+  }
+  .slide--split .slide__panel--primary {
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+  }
+  .slide--split .slide__panel--secondary {
+    background: var(--surface2);
+  }
+
+  /* ============ SLIDE TYPE: PIPELINE ============ */
+  .pipeline {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    flex: 1;
+    min-height: 0;
+    margin-top: clamp(10px, 1.5vh, 20px);
+  }
+
+  .pipeline__step {
+    flex: 1;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-top: 3px solid var(--accent);
+    border-radius: 10px;
+    padding: clamp(14px, 2.2vh, 26px) clamp(12px, 1.4vw, 20px);
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    transition: transform 0.2s ease, border-color 0.2s ease;
+  }
+
+  .pipeline__step:hover {
+    transform: translateY(-4px);
+    border-top-color: var(--green);
+  }
+
+  .pipeline__num {
+    font-family: var(--font-mono);
+    font-size: clamp(11px, 1.2vw, 13px);
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: 1px;
+  }
+
+  .pipeline__name {
+    font-size: clamp(15px, 1.8vw, 21px);
+    font-weight: 700;
+    margin: clamp(4px, 0.8vh, 8px) 0;
+    color: var(--text);
+  }
+
+  .pipeline__desc {
+    font-size: clamp(12px, 1.2vw, 15px);
+    color: var(--text-dim);
+    line-height: 1.5;
+    flex: 1;
+  }
+
+  .pipeline__tag {
+    font-family: var(--font-mono);
+    font-size: clamp(10px, 1vw, 12px);
+    color: var(--accent);
+    background: var(--accent-dim);
+    padding: 3px 8px;
+    border-radius: 4px;
+    margin-top: clamp(8px, 1.2vh, 16px);
+    align-self: flex-start;
+  }
+
+  .pipeline__arrow {
+    display: flex;
+    align-items: center;
+    padding: 0 clamp(2px, 0.4vw, 6px);
+    color: var(--accent);
+    flex-shrink: 0;
+    opacity: 0.5;
+  }
+
+  /* ============ SLIDE TYPE: MERMAID DIAGRAM ============ */
+  .slide--diagram {
+    padding: clamp(24px, 3.5vh, 48px) clamp(24px, 3.5vw, 60px);
+  }
+  .slide--diagram .slide__heading { margin-bottom: clamp(8px, 1.2vh, 16px); }
+
+  .mermaid-wrap {
+    position: relative;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    overflow: auto;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+
+  .zoom-controls {
+    position: absolute; top: 10px; right: 10px;
+    display: flex; gap: 4px; z-index: 10;
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 6px; padding: 2px;
+  }
+  .zoom-controls button {
+    width: 28px; height: 28px; border: none; background: transparent;
+    color: var(--text-dim); font-family: var(--font-mono); font-size: 14px;
+    cursor: pointer; border-radius: 4px;
+    display: flex; align-items: center; justify-content: center;
+    transition: background 0.15s, color 0.15s;
+  }
+  .zoom-controls button:hover { background: var(--accent-dim); color: var(--accent); }
+
+  .slide--diagram .mermaid {
+    transform-origin: center center;
+  }
+  .slide--diagram .mermaid svg {
+    width: 100% !important;
+    max-width: 100% !important;
+    height: auto !important;
+  }
+
+  /* ============ SLIDE TYPE: DASHBOARD ============ */
+  .slide--dashboard .slide__kpis {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(clamp(160px, 20vw, 240px), 1fr));
+    gap: clamp(12px, 1.8vw, 20px);
+    margin-top: clamp(10px, 1.5vh, 20px);
+  }
+
+  .slide__kpi {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: clamp(16px, 2.5vh, 28px) clamp(16px, 2vw, 24px);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .slide__kpi-val {
+    font-size: clamp(32px, 4.5vw, 56px);
+    font-weight: 800;
+    letter-spacing: -1px;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .slide__kpi-label {
+    font-family: var(--font-mono);
+    font-size: clamp(10px, 1.1vw, 12px);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    color: var(--text-dim);
+  }
+
+  .slide__kpi-sub {
+    font-size: clamp(12px, 1.2vw, 14px);
+    color: var(--text-dim);
+  }
+
+  /* ============ SLIDE TYPE: TABLE ============ */
+  .slide--table {
+    padding: clamp(24px, 3.5vh, 48px) clamp(24px, 3.5vw, 60px);
+  }
+  .table-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    flex: 1;
+    min-height: 0;
+    margin-top: clamp(8px, 1.2vh, 16px);
+  }
+  .table-scroll { overflow-x: auto; height: 100%; }
+
+  .data-table { width: 100%; border-collapse: collapse; text-align: left; }
+  .data-table th {
+    background: var(--surface2);
+    font-family: var(--font-mono);
+    font-size: clamp(11px, 1.2vw, 13px);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--accent);
+    padding: clamp(10px, 1.6vh, 16px) clamp(14px, 1.8vw, 22px);
+    border-bottom: 2px solid var(--border-bright);
+    white-space: nowrap;
+    position: sticky; top: 0; z-index: 2;
+  }
+  .data-table td {
+    padding: clamp(10px, 1.5vh, 15px) clamp(14px, 1.8vw, 22px);
+    border-bottom: 1px solid var(--border);
+    font-size: clamp(13px, 1.5vw, 17px);
+    vertical-align: middle;
+  }
+  .data-table tbody tr:nth-child(even) { background: rgba(255,255,255,0.02); }
+  .data-table tbody tr:hover { background: var(--accent-dim); }
+  .data-table code {
+    font-family: var(--font-mono); font-size: 0.9em;
+    background: var(--code-bg); color: var(--accent);
+    padding: 2px 6px; border-radius: 4px; border: 1px solid var(--border);
+  }
+
+  /* ============ SLIDE TYPE: CODE ============ */
+  .slide--code { align-items: center; }
+  .slide__code-block {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: clamp(20px, 3vh, 36px) clamp(20px, 3vw, 40px);
+    max-width: 960px;
+    width: 100%;
+    position: relative;
+    margin-top: clamp(12px, 2vh, 24px);
+    box-shadow: 0 12px 36px rgba(0,0,0,0.3);
+  }
+  .slide__code-filename {
+    position: absolute;
+    top: -12px; left: 24px;
+    font-family: var(--font-mono);
+    font-size: 11px; font-weight: 600;
+    padding: 3px 12px; border-radius: 4px;
+    background: var(--accent); color: #000000;
+    letter-spacing: 0.5px;
+  }
+  .slide__code-block pre { margin: 0; overflow-x: auto; }
+  .slide__code-block code {
+    font-family: var(--font-mono);
+    font-size: clamp(13px, 1.5vw, 17px);
+    line-height: 1.65;
+    color: var(--code-text);
+  }
+  .hl-kw { color: #f472b6; }
+  .hl-str { color: #a7f3d0; }
+  .hl-fn { color: #38bdf8; }
+  .hl-cm { color: #64748b; font-style: italic; }
+  .hl-gold { color: #fbbf24; }
+
+  /* ============ SLIDE TYPE: QUOTE ============ */
+  .slide--quote {
+    align-items: center;
+    text-align: center;
+    background-image: radial-gradient(circle at 50% 50%, var(--accent-dim) 0%, transparent 60%);
+  }
+  .slide__quote-mark {
+    font-size: clamp(60px, 12vw, 140px);
+    line-height: 0.5;
+    opacity: 0.15;
+    font-family: Georgia, serif;
+    color: var(--accent);
+    margin-bottom: -10px;
+  }
+  .slide--quote blockquote {
+    font-size: clamp(22px, 3.8vw, 42px);
+    font-weight: 600;
+    line-height: 1.35;
+    color: #ffffff;
+    max-width: 900px;
+    text-wrap: balance;
+  }
+  .slide--quote cite {
+    font-family: var(--font-mono);
+    font-size: clamp(11px, 1.3vw, 15px);
+    font-style: normal;
+    margin-top: clamp(16px, 2.5vh, 28px);
+    display: block;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+
+  /* ============ SLIDE TYPE: FULL-BLEED ============ */
+  .slide--bleed {
+    padding: 0;
+    justify-content: flex-end;
+  }
+  .slide__bg--gradient {
+    position: absolute; inset: 0;
+    background: linear-gradient(135deg, #051329 0%, #090d16 50%, #061e38 100%);
+    z-index: 0;
+  }
+  .slide--bleed .slide__content {
+    position: relative; z-index: 2;
+    padding: clamp(36px, 6vh, 80px) clamp(36px, 6vw, 100px);
+  }
+
+  /* Responsive Rules */
+  @media (max-width: 768px) {
+    .slide--content .slide__inner { grid-template-columns: 1fr; }
+    .slide--split .slide__panels { grid-template-columns: 1fr; }
+    .pipeline { flex-direction: column; }
+    .pipeline__arrow { justify-content: center; transform: rotate(90deg); padding: 4px 0; }
+  }
+</style>
+</head>
+<body>
+
+<div class="deck">
+
+  <!-- SLIDE 1: TITLE -->
+  <section class="slide slide--title">
+    <div class="reveal">
+      <span class="slide__label" style="margin-bottom:16px;">Core System Guide &mdash; v0.1.0</span>
+    </div>
+    <h1 class="slide__display reveal">The Internals of fff-memory</h1>
+    <div class="reveal" style="margin-top:clamp(16px, 2.5vh, 28px);">
+      <p class="slide__subtitle">Write smart, search cheap &mdash; embedded Rust memory engine with 5 MCP tools</p>
+    </div>
+    <div class="reveal" style="display:flex; gap:10px; margin-top:clamp(16px, 2.5vh, 32px);">
+      <span class="badge badge--cyan">Zero-Network Writes</span>
+      <span class="badge badge--gold">fff-search Index</span>
+      <span class="badge badge--green">5 MCP Tools</span>
+      <span class="badge badge--cyan">Token-Budgeted</span>
+    </div>
+  </section>
+
+  <!-- SLIDE 2: THE CORE THESIS -->
+  <section class="slide slide--quote">
+    <div class="slide__quote-mark reveal">&ldquo;</div>
+    <blockquote class="reveal">
+      Spend intelligence once at write time. Query in microseconds with zero external infrastructure.
+    </blockquote>
+    <cite class="reveal">&mdash; Spec 00: Architecture Invariant</cite>
+  </section>
+
+  <!-- SLIDE 3: BEFORE & AFTER (PREDECESSOR LESSONS) -->
+  <section class="slide slide--split">
+    <div class="slide__panels">
+      <div class="slide__panel slide__panel--primary">
+        <p class="slide__label" style="color:var(--red);">Predecessor Pitfalls (Go + LibSQL + Embeddings)</p>
+        <h2 class="slide__heading" style="font-size:clamp(20px,3vw,32px);">Infrastructure at Query Time</h2>
+        <ul class="slide__bullets">
+          <li class="reveal"><strong>Fragile write path:</strong> Depended on a LAN embedding server; when down, zero rows stored.</li>
+          <li class="reveal"><strong>Silent failures:</strong> Cosine similarity threshold (0.7) silently dropped valid notes.</li>
+          <li class="reveal"><strong>Tool surface sprawl:</strong> 6 tools across 4 duplicate type representations.</li>
+          <li class="reveal"><strong>Binary bloat:</strong> 52MB of committed binaries & dead vector code accumulated.</li>
+        </ul>
+      </div>
+      <div class="slide__panel slide__panel--secondary">
+        <p class="slide__label" style="color:var(--green);">The fff-memory Paradigm (Rust + fff + rmcp)</p>
+        <h2 class="slide__heading" style="font-size:clamp(20px,3vw,32px);">Semantic Write, Lexical Query</h2>
+        <ul class="slide__bullets">
+          <li class="reveal"><strong>Zero-network writes:</strong> Atomic file writes that always succeed, even with index down.</li>
+          <li class="reveal"><strong>Microsecond search:</strong> Embedded fff lexical search with explainable match reasons.</li>
+          <li class="reveal"><strong>5 MCP tools:</strong> Minimal, ergonomic surface preventing agent fumbling.</li>
+          <li class="reveal"><strong>Files as source of truth:</strong> Human-inspectable Markdown + Obsidian compatible.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- SLIDE 4: THE 5 NON-NEGOTIABLE INVARIANTS -->
+  <section class="slide slide--content" style="background-image:radial-gradient(ellipse at 15% 75%, var(--accent-dim) 0%, transparent 45%);">
+    <div class="slide__inner">
+      <div>
+        <p class="slide__label">Design Constraints</p>
+        <h2 class="slide__heading">5 Non-Negotiable Invariants</h2>
+        <ul class="slide__bullets">
+          <li class="reveal"><strong>1. Files are Source of Truth:</strong> Index is a disposable cache rebuildable in one scan.</li>
+          <li class="reveal"><strong>2. Write Path Never Fails:</strong> Zero network and zero index dependencies on write.</li>
+          <li class="reveal"><strong>3. Exactly 5 MCP Tools:</strong> Focused surface; agents fumble wide tool suites.</li>
+          <li class="reveal"><strong>4. Token Economy First:</strong> Snippet-first retrieval strictly shaped by byte budget.</li>
+          <li class="reveal"><strong>5. Explainable &amp; No Silent Empties:</strong> Every result carries a "why"; misses explain what was tried.</li>
+        </ul>
+      </div>
+      <div class="card-box reveal">
+        <span class="slide__label slide__label--gold">Why Token Economy?</span>
+        <p class="slide__body" style="font-size:15px;">
+          The context window is the scarcest resource. Returning 5 whole raw markdown files wastes thousands of tokens.
+        </p>
+        <div style="background:var(--code-bg); padding:12px; border-radius:6px; border:1px solid var(--border); font-family:var(--font-mono); font-size:13px; color:var(--green);">
+          &check; Snippet + Match Reason<br>
+          &check; Byte budget clamp (4KB default)<br>
+          &check; Expand full note on demand (memory_read)
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SLIDE 5: SECTION DIVIDER 01 -->
+  <section class="slide slide--divider">
+    <span class="slide__number">01</span>
+    <div>
+      <p class="slide__label">Storage Layer</p>
+      <h2 class="slide__heading reveal">Note Format &amp; Storage Layout</h2>
+      <p class="slide__subtitle reveal">Human-readable Markdown with YAML frontmatter &amp; Obsidian compatibility</p>
+    </div>
+  </section>
+
+  <!-- SLIDE 6: NOTE FORMAT ANATOMY -->
+  <section class="slide slide--code">
+    <div style="text-align:center;">
+      <p class="slide__label">Spec 01 &mdash; Note Schema</p>
+      <h2 class="slide__heading" style="margin-bottom:8px;">Anatomy of a Memory Note</h2>
+    </div>
+    <div class="slide__code-block reveal">
+      <span class="slide__code-filename">linehaul/deploy-pipeline.md</span>
+      <pre><code><span class="hl-kw">---</span>
+<span class="hl-str">title</span>: Deploy pipeline uses GitHub Actions + Docker
+<span class="hl-gold">aliases</span>: [<span class="hl-str">release process</span>, <span class="hl-str">CI/CD</span>, <span class="hl-str">shipping</span>, <span class="hl-str">how we deploy</span>]
+<span class="hl-str">tags</span>: [infra, deployment]
+<span class="hl-str">type</span>: fact <span class="hl-cm"># fact | decision | preference | lesson | reference | session-summary</span>
+<span class="hl-str">created</span>: 2026-08-15
+<span class="hl-str">updated</span>: 2026-08-15
+<span class="hl-str">source</span>: session e32af3d7
+<span class="hl-kw">---</span>
+The deployment pipeline builds in GitHub Actions and publishes Docker images.
+Rollbacks are re-deploys of the previous tag.
+Related: [[docker-registry-auth]]</code></pre>
+    </div>
+  </section>
+
+  <!-- SLIDE 7: THE ALIAS DISCIPLINE -->
+  <section class="slide slide--content" style="background-image:radial-gradient(ellipse at 85% 20%, var(--gold-dim) 0%, transparent 40%);">
+    <div class="slide__inner">
+      <div>
+        <p class="slide__label slide__label--gold">Load-Bearing Field</p>
+        <h2 class="slide__heading">The Alias Discipline</h2>
+        <p class="slide__body" style="margin-bottom:16px;">
+          The <code>aliases</code> field is the direct semantic-search replacement. The LLM generates synonyms and alternate phrasings at write time so future lexical search succeeds under varied vocabulary.
+        </p>
+        <ul class="slide__bullets">
+          <li class="reveal"><strong>Rule:</strong> Minimum 2 aliases required; aim for 3&ndash;6.</li>
+          <li class="reveal"><strong>Vocabulary of Questions:</strong> Write aliases using terms the user will actually query, not rewordings of the title.</li>
+          <li class="reveal"><strong>Matched Rationale:</strong> Retrieval returns exact alias matches in the <code>why</code> explanation field.</li>
+        </ul>
+      </div>
+      <div class="card-box reveal" style="border-top:3px solid var(--gold);">
+        <span class="slide__label slide__label--gold">Example Query Scenarios</span>
+        <div style="font-family:var(--font-mono); font-size:13px; line-height:1.7;">
+          <span style="color:var(--text-dim);">Title:</span> <span style="color:var(--text);">Deploy pipeline uses GH Actions</span><br>
+          <span style="color:var(--gold);">User asks:</span> "How do we ship code?"<br>
+          <span style="color:var(--green);">&rarr; Matches alias: 'shipping'</span><br><br>
+          <span style="color:var(--gold);">User asks:</span> "What is our CI/CD setup?"<br>
+          <span style="color:var(--green);">&rarr; Matches alias: 'CI/CD'</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SLIDE 8: DIRECTORY LAYOUT & NAMESPACES -->
+  <section class="slide slide--split">
+    <div class="slide__panels">
+      <div class="slide__panel slide__panel--primary">
+        <p class="slide__label">Filesystem Hierarchy</p>
+        <h2 class="slide__heading" style="font-size:clamp(20px,3vw,32px);">Namespaces as Folders</h2>
+        <p class="slide__body">
+          Memories live in nested directories under the memory root. The handle <code>linehaul/tms/auth</code> directly maps to <code>linehaul/tms/auth.md</code> on disk.
+        </p>
+        <ul class="slide__bullets">
+          <li class="reveal"><strong>XDG Default:</strong> <code>~/.local/share/fff-memory/</code></li>
+          <li class="reveal"><strong>Project Root:</strong> <code>.memory/</code> with <code>--project</code> flag</li>
+          <li class="reveal"><strong>Git Friendly:</strong> Commit the directory to track memory history &amp; team sync.</li>
+        </ul>
+      </div>
+      <div class="slide__panel slide__panel--secondary">
+        <p class="slide__label slide__label--green">Reserved System Folders</p>
+        <div style="display:flex; flex-direction:column; gap:12px;">
+          <div class="card-box" style="padding:14px; background:var(--code-bg);">
+            <div style="font-family:var(--font-mono); font-size:14px; color:var(--accent); font-weight:700;">.index/</div>
+            <p style="font-size:13px; color:var(--text-dim);">Contains LMDB frecency state &amp; access.log. Disposable cache; automatically gitignored.</p>
+          </div>
+          <div class="card-box" style="padding:14px; background:var(--code-bg);">
+            <div style="font-family:var(--font-mono); font-size:14px; color:var(--gold); font-weight:700;">.archive/</div>
+            <p style="font-size:13px; color:var(--text-dim);">Where expired notes or soft-forgotten memories are moved. Excluded from default search.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SLIDE 9: SECTION DIVIDER 02 -->
+  <section class="slide slide--divider">
+    <span class="slide__number">02</span>
+    <div>
+      <p class="slide__label">Atomic Write Engine</p>
+      <h2 class="slide__heading reveal">The Write Path &amp; Dedup Probe</h2>
+      <p class="slide__subtitle reveal">Fail-safe storage with automatic deduplication probe and atomic rename</p>
+    </div>
+  </section>
+
+  <!-- SLIDE 10: WRITE PIPELINE (CSS PIPELINE) -->
+  <section class="slide" style="background-image:radial-gradient(ellipse at 50% 90%, var(--accent-dim) 0%, transparent 40%);">
+    <p class="slide__label">Spec 02 &mdash; Store Execution</p>
+    <h2 class="slide__heading">5-Step Atomic Write Pipeline</h2>
+    <div class="pipeline reveal">
+      <div class="pipeline__step" style="border-top-color:var(--accent);">
+        <div class="pipeline__num">01. VALIDATE</div>
+        <div class="pipeline__name">Input Guard</div>
+        <div class="pipeline__desc">Check required title, min 2 aliases, allowed type, traversal-free namespace.</div>
+        <div class="pipeline__tag">symlink_metadata</div>
+      </div>
+      <div class="pipeline__arrow">
+        <svg viewBox="0 0 24 24" width="20" height="20"><path d="M5 12h14m-4-4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+      </div>
+      <div class="pipeline__step" style="border-top-color:var(--accent);">
+        <div class="pipeline__num">02. SLUGIFY</div>
+        <div class="pipeline__name">Slug Creation</div>
+        <div class="pipeline__desc">Derive kebab-case ASCII slug (max 60 chars) as candidate note handle.</div>
+        <div class="pipeline__tag">kebab-case</div>
+      </div>
+      <div class="pipeline__arrow">
+        <svg viewBox="0 0 24 24" width="20" height="20"><path d="M5 12h14m-4-4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+      </div>
+      <div class="pipeline__step" style="border-top-color:var(--gold);">
+        <div class="pipeline__num">03. PROBE</div>
+        <div class="pipeline__name">Dedup Probe</div>
+        <div class="pipeline__desc">Best-effort check for near-duplicate in target namespace via title &amp; aliases.</div>
+        <div class="pipeline__tag">Best-Effort</div>
+      </div>
+      <div class="pipeline__arrow">
+        <svg viewBox="0 0 24 24" width="20" height="20"><path d="M5 12h14m-4-4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+      </div>
+      <div class="pipeline__step" style="border-top-color:var(--green);">
+        <div class="pipeline__num">04. WRITE</div>
+        <div class="pipeline__name">Atomic fsync</div>
+        <div class="pipeline__desc">Write temp file in same directory, fsync, atomic rename over target note.</div>
+        <div class="pipeline__tag">Atomic Rename</div>
+      </div>
+      <div class="pipeline__arrow">
+        <svg viewBox="0 0 24 24" width="20" height="20"><path d="M5 12h14m-4-4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+      </div>
+      <div class="pipeline__step" style="border-top-color:var(--purple);">
+        <div class="pipeline__num">05. EMIT</div>
+        <div class="pipeline__name">Structured ACK</div>
+        <div class="pipeline__desc">Return action (created|updated) and dedup_hit slug to caller.</div>
+        <div class="pipeline__tag">JSON Response</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SLIDE 11: DEDUP & MERGE SEMANTICS -->
+  <section class="slide slide--split">
+    <div class="slide__panels">
+      <div class="slide__panel slide__panel--primary">
+        <p class="slide__label slide__label--gold">Update Mode: Append (Default)</p>
+        <h2 class="slide__heading" style="font-size:clamp(18px,2.5vw,28px);">Augmenting Memory</h2>
+        <p class="slide__body">
+          When dedup detects an existing note and <code>mode: "append"</code> is selected:
+        </p>
+        <ul class="slide__bullets">
+          <li class="reveal">Preserves original note body.</li>
+          <li class="reveal">Appends a dated addendum section with new learnings.</li>
+          <li class="reveal">Unions existing aliases &amp; tags with new inputs.</li>
+          <li class="reveal">Updates <code>updated: YYYY-MM-DD</code> timestamp.</li>
+        </ul>
+      </div>
+      <div class="slide__panel slide__panel--secondary">
+        <p class="slide__label slide__label--cyan">Update Mode: Replace</p>
+        <h2 class="slide__heading" style="font-size:clamp(18px,2.5vw,28px);">Superseding Memory</h2>
+        <p class="slide__body">
+          When the new state completely replaces obsolete knowledge:
+        </p>
+        <ul class="slide__bullets">
+          <li class="reveal">Replaces the entire markdown body with the new fact.</li>
+          <li class="reveal">Unions aliases and tags to retain query discovery.</li>
+          <li class="reveal">Retains original <code>created</code> date while bumping <code>updated</code>.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- SLIDE 12: SECTION DIVIDER 03 -->
+  <section class="slide slide--divider">
+    <span class="slide__number">03</span>
+    <div>
+      <p class="slide__label">Retrieval Pipeline</p>
+      <h2 class="slide__heading reveal">Layered Retrieval &amp; Ranking</h2>
+      <p class="slide__subtitle reveal">Embedded fff-search, frecency scoring, and token-budgeted output</p>
+    </div>
+  </section>
+
+  <!-- SLIDE 13: RETRIEVAL MERMAID DIAGRAM -->
+  <section class="slide slide--diagram">
+    <h2 class="slide__heading reveal">Concurrent Layered Retrieval Pipeline</h2>
+    <div class="mermaid-wrap reveal">
+      <div class="zoom-controls">
+        <button onclick="zoomDiagram(this,1.2)" title="Zoom in">+</button>
+        <button onclick="zoomDiagram(this,0.8)" title="Zoom out">&minus;</button>
+        <button onclick="resetZoom(this)" title="Reset">&#8634;</button>
+        <button onclick="openDiagramFullscreen(this)" title="Open full size in new tab">&#x26F6;</button>
+      </div>
+      <pre class="mermaid">
+graph LR
+  Q["Query Input<br/>fff-query-parser"] --> PathMatch["fffind Path/Slug<br/>(Title Matches)"]
+  Q --> ContentGrep["Plain Grep<br/>(Content, Frontmatter & Aliases)"]
+  
+  PathMatch --> Merge["Merge & Dedupe<br/>(Max Score + Both-Stages Bonus)"]
+  ContentGrep --> Merge
+  
+  Merge -->|"Count < min_results (3)"| FuzzyEsc["Fuzzy Grep Escalation<br/>(Recall Expansion)"]
+  FuzzyEsc --> Merge
+  
+  Merge --> Rank["Frecency Multiplier<br/>Score = match * (1 + 0.25*hits)"]
+  Rank --> Budget["Token Budget Filter<br/>Clamp to budget_bytes (4KB)"]
+  Budget --> Out["Shaped Results<br/>{handle, title, snippet, why, score}"]
+
+  classDef primary fill:#38bdf822,stroke:#38bdf8,stroke-width:2px;
+  classDef accent fill:#fbbf2422,stroke:#fbbf24,stroke-width:2px;
+  classDef storage fill:#34d39922,stroke:#34d399,stroke-width:2px;
+
+  class Q,Out primary;
+  class PathMatch,ContentGrep,FuzzyEsc accent;
+  class Merge,Rank,Budget storage;
+      </pre>
+    </div>
+  </section>
+
+  <!-- SLIDE 14: SCORING & FRECENCY REINFORCEMENT -->
+  <section class="slide slide--content" style="background-image:radial-gradient(ellipse at 20% 80%, var(--green-dim) 0%, transparent 45%);">
+    <div class="slide__inner">
+      <div>
+        <p class="slide__label slide__label--green">Explainable Math</p>
+        <h2 class="slide__heading">Scoring &amp; Frecency Formula</h2>
+        <ul class="slide__bullets">
+          <li class="reveal"><strong>Normalized Match Score:</strong> Base score normalized to <code>0.0 ..= 1.0</code>.</li>
+          <li class="reveal"><strong>Both-Stages Bonus:</strong> Notes matching in both filename and content receive a ranking bonus.</li>
+          <li class="reveal"><strong>Frecency Multiplier:</strong> Calculated from <code>access.log</code>:
+            <div style="font-family:var(--font-mono); color:var(--accent); font-size:14px; margin-top:4px;">
+              Frecency = 1.0 + (reads + 0.25 * search_hits) / 30_days
+            </div>
+          </li>
+          <li class="reveal"><strong>Type Boosts:</strong> Architectural <code>decision</code> and <code>preference</code> slightly outrank raw <code>session-summary</code> notes.</li>
+        </ul>
+      </div>
+      <div class="card-box reveal">
+        <span class="slide__label">Explainable "Why" Line</span>
+        <p class="slide__body" style="font-size:14px;">Every result tells the agent exactly why it was surfaced:</p>
+        <div style="background:var(--code-bg); padding:10px 14px; border-radius:6px; font-family:var(--font-mono); font-size:12px; color:var(--gold); border:1px solid var(--border);">
+          "why": "alias:shipping +frecency(3r+8s/30d)"
+        </div>
+        <p class="slide__body" style="font-size:13px; color:var(--text-dim);">
+          No black-box embeddings &mdash; agents understand if the match was in a title, tag, alias, or body line.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- SLIDE 15: PERFORMANCE & TOKEN BUDGET -->
+  <section class="slide slide--dashboard">
+    <p class="slide__label">Spec 03 &mdash; Metrics &amp; Budget</p>
+    <h2 class="slide__heading">Token Economy &amp; Retrieval Speed</h2>
+    <div class="slide__kpis">
+      <div class="slide__kpi reveal">
+        <div class="slide__kpi-val" style="color:var(--accent);">&lt; 10ms</div>
+        <div class="slide__kpi-label">P50 Search Latency</div>
+        <div class="slide__kpi-sub">Warm embedded index query</div>
+      </div>
+      <div class="slide__kpi reveal">
+        <div class="slide__kpi-val" style="color:var(--green);">0 Network</div>
+        <div class="slide__kpi-label">Dependencies</div>
+        <div class="slide__kpi-sub">Embedded fff crate in Rust</div>
+      </div>
+      <div class="slide__kpi reveal">
+        <div class="slide__kpi-val" style="color:var(--gold);">4 KB</div>
+        <div class="slide__kpi-label">Default Token Budget</div>
+        <div class="slide__kpi-sub">Clamped max: 16 KB</div>
+      </div>
+      <div class="slide__kpi reveal">
+        <div class="slide__kpi-val" style="color:var(--purple);">0 Silent</div>
+        <div class="slide__kpi-label">Empty Returns</div>
+        <div class="slide__kpi-sub">Always explains what was tried</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SLIDE 16: SECTION DIVIDER 04 -->
+  <section class="slide slide--divider">
+    <span class="slide__number">04</span>
+    <div>
+      <p class="slide__label">Interface Surface</p>
+      <h2 class="slide__heading reveal">The 5 MCP Tools</h2>
+      <p class="slide__subtitle reveal">Minimal tool surface via rmcp stdio JSON-RPC 2.0</p>
+    </div>
+  </section>
+
+  <!-- SLIDE 17: MCP TOOL INVENTORY TABLE -->
+  <section class="slide slide--table">
+    <p class="slide__label">Spec 04 &mdash; Tool Surface</p>
+    <h2 class="slide__heading">Five Tools, No More</h2>
+    <div class="table-wrap reveal">
+      <div class="table-scroll">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Tool Name</th>
+              <th>Primary Arguments</th>
+              <th>Action / Output</th>
+              <th>Guarantees</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>memory_store</code></td>
+              <td><code>title, body, aliases, type, [namespace, tags, mode]</code></td>
+              <td>Creates or merges note; returns action &amp; slug</td>
+              <td><span class="badge badge--green">0-Network Write</span></td>
+            </tr>
+            <tr>
+              <td><code>memory_search</code></td>
+              <td><code>query, [namespace, limit, budget_bytes, include_archived]</code></td>
+              <td>Returns ranked snippets + 'why' provenance lines</td>
+              <td><span class="badge badge--cyan">Token-Budgeted</span></td>
+            </tr>
+            <tr>
+              <td><code>memory_read</code></td>
+              <td><code>handle ("namespace/slug")</code></td>
+              <td>Returns full YAML frontmatter + Markdown body</td>
+              <td><span class="badge badge--gold">Reinforces Frecency</span></td>
+            </tr>
+            <tr>
+              <td><code>memory_forget</code></td>
+              <td><code>handle, [hard: bool]</code></td>
+              <td>Soft-archive to <code>.archive/</code> or hard delete</td>
+              <td><span class="badge badge--red">Safe Preserving</span></td>
+            </tr>
+            <tr>
+              <td><code>memory_stats</code></td>
+              <td><code>[namespace]</code></td>
+              <td>Counts, types, disk bytes, index state, decay report</td>
+              <td><span class="badge badge--cyan">Store Health</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- SLIDE 18: AGENT USAGE: THE QUERY LOOP -->
+  <section class="slide slide--code">
+    <div style="text-align:center;">
+      <p class="slide__label">Practical Workflow</p>
+      <h2 class="slide__heading" style="margin-bottom:8px;">How Agents Query &amp; Expand Memory</h2>
+    </div>
+    <div class="slide__code-block reveal">
+      <span class="slide__code-filename">Agent Step Sequence</span>
+      <pre><code><span class="hl-cm">// 1. Search with relevant keywords (cheap & microsecond fast)</span>
+<span class="hl-fn">memory_search</span>({ <span class="hl-str">"query"</span>: <span class="hl-str">"shipping cadence deployment"</span> })
+<span class="hl-cm">// Returns token-budgeted snippet:</span>
+<span class="hl-str">{ "results": [{</span>
+    <span class="hl-str">"handle"</span>: <span class="hl-str">"linehaul/deploy-pipeline"</span>,
+    <span class="hl-str">"title"</span>: <span class="hl-str">"Deploy pipeline uses GitHub Actions + Docker"</span>,
+    <span class="hl-str">"snippet"</span>: <span class="hl-str">"The deployment pipeline builds in GitHub Actions..."</span>,
+    <span class="hl-str">"why"</span>: <span class="hl-str">"alias:shipping +frecency(3r+8s/30d)"</span>,
+    <span class="hl-str">"score"</span>: <span class="hl-gold">0.94</span>
+<span class="hl-str">}]}</span>
+
+<span class="hl-cm">// 2. If snippet is sufficient &rarr; answer directly. If full details needed &rarr; expand:</span>
+<span class="hl-fn">memory_read</span>({ <span class="hl-str">"handle"</span>: <span class="hl-str">"linehaul/deploy-pipeline"</span> })</code></pre>
+    </div>
+  </section>
+
+  <!-- SLIDE 19: CLI & AUTOMATION HOOKS -->
+  <section class="slide slide--split">
+    <div class="slide__panels">
+      <div class="slide__panel slide__panel--primary">
+        <p class="slide__label">CLI Interface</p>
+        <h2 class="slide__heading" style="font-size:clamp(18px,2.5vw,28px);">Mirroring MCP on the Terminal</h2>
+        <div style="background:var(--code-bg); padding:14px; border-radius:8px; border:1px solid var(--border); font-family:var(--font-mono); font-size:12px; line-height:1.8;">
+          <span class="hl-cm"># Start stdio server</span><br>
+          <span style="color:var(--accent);">fff-memory serve --project</span><br><br>
+          <span class="hl-cm"># Search from CLI</span><br>
+          <span style="color:var(--accent);">fff-memory search "deploy" --project</span><br><br>
+          <span class="hl-cm"># Health &amp; doctor sweep</span><br>
+          <span style="color:var(--accent);">fff-memory doctor</span>
+        </div>
+      </div>
+      <div class="slide__panel slide__panel--secondary">
+        <p class="slide__label slide__label--green">Thin Hooks Pattern</p>
+        <h2 class="slide__heading" style="font-size:clamp(18px,2.5vw,28px);">Claude Code Integration</h2>
+        <p class="slide__body" style="font-size:14px;">
+          Hooks stay thin: each hook makes exactly <strong>one tool call</strong>; all memory logic lives inside the tools.
+        </p>
+        <ul class="slide__bullets">
+          <li class="reveal"><strong>Session Start:</strong> Recall user preferences and active project rules.</li>
+          <li class="reveal"><strong>Pre-Compact:</strong> Summarize context and store key architectural decisions before context wipes.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- SLIDE 20: SECTION DIVIDER 05 -->
+  <section class="slide slide--divider">
+    <span class="slide__number">05</span>
+    <div>
+      <p class="slide__label">Lifecycle &amp; Maintenance</p>
+      <h2 class="slide__heading reveal">Access Logs &amp; Doctor Sweeps</h2>
+      <p class="slide__subtitle reveal">Decay tracking, TTL expiry, and self-healing memory hygiene</p>
+    </div>
+  </section>
+
+  <!-- SLIDE 21: LIFECYCLE & DOCTOR SWEEPS -->
+  <section class="slide slide--content" style="background-image:radial-gradient(ellipse at 70% 30%, var(--purple-dim) 0%, transparent 45%);">
+    <div class="slide__inner">
+      <div>
+        <p class="slide__label slide__label--gold">Spec 05 &mdash; Lifecycle</p>
+        <h2 class="slide__heading">Access Logging &amp; Decay</h2>
+        <ul class="slide__bullets">
+          <li class="reveal"><strong>Append-Only Log:</strong> <code>.index/access.log</code> records read and search-hit events.</li>
+          <li class="reveal"><strong>Reinforcement:</strong> Frequently read notes receive a frecency multiplier bonus during ranking.</li>
+          <li class="reveal"><strong>Decay Identification:</strong> Notes unaccessed after 30 days are flagged as decaying.</li>
+          <li class="reveal"><strong>TTL Expiry:</strong> Notes with <code>expires: YYYY-MM-DD</code> past date are candidates for cleanup.</li>
+        </ul>
+      </div>
+      <div class="card-box reveal" style="border-top:3px solid var(--purple);">
+        <span class="slide__label" style="color:var(--purple);">Doctor Sweep Operations</span>
+        <div style="display:flex; flex-direction:column; gap:8px; font-size:14px;">
+          <div style="color:var(--text); font-weight:600;">1. Archive Expired:</div>
+          <div style="color:var(--text-dim); font-size:13px;">Moves notes past TTL into <code>.archive/</code>.</div>
+          <div style="color:var(--text); font-weight:600;">2. Broken Link Prune:</div>
+          <div style="color:var(--text-dim); font-size:13px;">Detects dangling wikilinks.</div>
+          <div style="color:var(--text); font-weight:600;">3. Reindex Cache:</div>
+          <div style="color:var(--text-dim); font-size:13px;">Wipes &amp; rebuilds <code>.index/</code> from disk Markdown in one fast scan.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SLIDE 22: FULL-BLEED CLOSING -->
+  <section class="slide slide--bleed">
+    <div class="slide__bg--gradient"></div>
+    <div class="slide__content">
+      <p class="slide__label" style="color:var(--accent);">Summary &amp; Next Steps</p>
+      <h1 class="slide__display" style="font-size:clamp(36px,5.5vw,68px); color:#ffffff;">Write Smart. Search Cheap.</h1>
+      <p class="slide__subtitle" style="color:var(--text-dim); margin-top:14px; max-width:700px;">
+        Agent memory built in Rust with zero network write dependencies, microsecond fff-search retrieval, and Obsidian-compatible Markdown files.
+      </p>
+      <div style="display:flex; gap:12px; margin-top:24px;">
+        <span class="badge badge--green">cargo build --workspace</span>
+        <span class="badge badge--cyan">fff-memory serve --project</span>
+      </div>
+    </div>
+  </section>
+
+</div><!-- /deck -->
+
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+
+  const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'base',
+    look: 'classic',
+    themeVariables: {
+      primaryColor: isDark ? '#162035' : '#e0f2fe',
+      primaryBorderColor: isDark ? '#38bdf8' : '#0284c7',
+      primaryTextColor: isDark ? '#f1f5f9' : '#0f172a',
+      secondaryColor: isDark ? '#1f2d4d' : '#fef3c7',
+      secondaryBorderColor: isDark ? '#fbbf24' : '#d97706',
+      secondaryTextColor: isDark ? '#f1f5f9' : '#0f172a',
+      tertiaryColor: isDark ? '#102820' : '#dcfce7',
+      tertiaryBorderColor: isDark ? '#34d399' : '#059669',
+      tertiaryTextColor: isDark ? '#f1f5f9' : '#0f172a',
+      lineColor: isDark ? '#94a3b8' : '#64748b',
+      fontSize: '16px',
+      fontFamily: 'var(--font-body)',
+      noteBkgColor: isDark ? '#162035' : '#fef3c7',
+      noteTextColor: isDark ? '#f1f5f9' : '#0f172a',
+      noteBorderColor: isDark ? '#fbbf24' : '#d97706',
+    }
+  });
+
+  function autoFit() {
+    document.querySelectorAll('.mermaid svg').forEach(function(svg) {
+      svg.removeAttribute('height');
+      svg.style.width = '100%';
+      svg.style.maxWidth = '100%';
+      svg.style.height = 'auto';
+      svg.parentElement.style.width = '100%';
+    });
+    document.querySelectorAll('.slide__kpi-val').forEach(function(el) {
+      if (el.scrollWidth > el.clientWidth) {
+        var s = el.clientWidth / el.scrollWidth;
+        el.style.transform = 'scale(' + s + ')';
+        el.style.transformOrigin = 'left top';
+      }
+    });
+    document.querySelectorAll('.slide--quote blockquote').forEach(function(el) {
+      var len = el.textContent.trim().length;
+      if (len > 100) {
+        var scale = Math.max(0.5, 100 / len);
+        var fs = parseFloat(getComputedStyle(el).fontSize);
+        el.style.fontSize = Math.max(16, Math.round(fs * scale)) + 'px';
+      }
+    });
+  }
+
+  mermaid.run().then(function() {
+    autoFit();
+    new SlideEngine();
+  });
+</script>
+
+<script>
+  // Mermaid zoom controls + click-to-expand
+  var INITIAL_ZOOM = 1;
+  function zoomDiagram(b, f) {
+    var w = b.closest('.mermaid-wrap');
+    var t = w.querySelector('.mermaid');
+    var c = parseFloat(t.dataset.zoom || INITIAL_ZOOM);
+    var n = Math.min(Math.max(c * f, 0.5), 5);
+    t.dataset.zoom = n;
+    t.style.zoom = n;
+  }
+  function resetZoom(b) {
+    var w = b.closest('.mermaid-wrap');
+    var t = w.querySelector('.mermaid');
+    t.dataset.zoom = INITIAL_ZOOM;
+    t.style.zoom = INITIAL_ZOOM;
+  }
+  function openDiagramFullscreen(b) {
+    openMermaidInNewTab(b.closest('.mermaid-wrap'));
+  }
+  function openMermaidInNewTab(w) {
+    var svg = w.querySelector('.mermaid svg');
+    if (!svg) return;
+    var clone = svg.cloneNode(true);
+    clone.style.zoom = '';
+    clone.style.transform = '';
+    var styles = getComputedStyle(document.documentElement);
+    var bg = styles.getPropertyValue('--bg').trim() || '#090d16';
+    var html = '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Diagram</title><style>body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:' + bg + ';padding:40px;box-sizing:border-box}svg{max-width:100%;max-height:90vh;height:auto}</style></head><body>' + clone.outerHTML + '</body></html>';
+    window.open(URL.createObjectURL(new Blob([html], { type: 'text/html' })), '_blank');
+  }
+
+  document.querySelectorAll('.mermaid-wrap').forEach(function(w) {
+    w.addEventListener('wheel', function(e) {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      var t = w.querySelector('.mermaid');
+      var c = parseFloat(t.dataset.zoom || INITIAL_ZOOM);
+      var f = e.deltaY < 0 ? 1.1 : 0.9;
+      var n = Math.min(Math.max(c * f, 0.5), 5);
+      t.dataset.zoom = n;
+      t.style.zoom = n;
+    }, { passive: false });
+
+    var sX, sY, sL, sT, sTime, didPan;
+    w.addEventListener('mousedown', function(e) {
+      if (e.target.closest('.zoom-controls')) return;
+      w.classList.add('is-panning');
+      sX = e.clientX; sY = e.clientY;
+      sL = w.scrollLeft; sT = w.scrollTop;
+      sTime = Date.now();
+      didPan = false;
+    });
+    window.addEventListener('mousemove', function(e) {
+      if (!w.classList.contains('is-panning')) return;
+      var dx = e.clientX - sX, dy = e.clientY - sY;
+      if (Math.abs(dx) > 5 || Math.abs(dy) > 5) didPan = true;
+      w.scrollLeft = sL - dx;
+      w.scrollTop = sT - dy;
+    });
+    window.addEventListener('mouseup', function() {
+      if (!w.classList.contains('is-panning')) return;
+      w.classList.remove('is-panning');
+      if (!didPan && Date.now() - sTime < 300) openMermaidInNewTab(w);
+    });
+  });
+
+  // SlideEngine Class
+  function SlideEngine() {
+    this.deck = document.querySelector('.deck');
+    this.slides = [].slice.call(document.querySelectorAll('.slide'));
+    this.current = 0;
+    this.total = this.slides.length;
+    this.buildChrome();
+    this.bindEvents();
+    this.observe();
+    this.update();
+  }
+
+  SlideEngine.prototype.buildChrome = function() {
+    var bar = document.createElement('div');
+    bar.className = 'deck-progress';
+    document.body.appendChild(bar);
+    this.bar = bar;
+
+    var dots = document.createElement('div');
+    dots.className = 'deck-dots';
+    var self = this;
+    this.slides.forEach(function(_, i) {
+      var d = document.createElement('button');
+      d.className = 'deck-dot';
+      d.title = 'Slide ' + (i + 1);
+      d.onclick = function() { self.goTo(i); };
+      dots.appendChild(d);
+    });
+    document.body.appendChild(dots);
+    this.dots = [].slice.call(dots.children);
+
+    var ctr = document.createElement('div');
+    ctr.className = 'deck-counter';
+    document.body.appendChild(ctr);
+    this.counter = ctr;
+
+    var hints = document.createElement('div');
+    hints.className = 'deck-hints';
+    hints.textContent = '\u2190 \u2192 / Space or scroll to navigate';
+    document.body.appendChild(hints);
+    this.hints = hints;
+    this.hintTimer = setTimeout(function() {
+      hints.classList.add('faded');
+    }, 4000);
+  };
+
+  SlideEngine.prototype.bindEvents = function() {
+    var self = this;
+    document.addEventListener('keydown', function(e) {
+      if (e.target.closest('.mermaid-wrap, .table-scroll, .code-scroll, input, textarea, [contenteditable]')) return;
+      if (['ArrowDown', 'ArrowRight', ' ', 'PageDown'].indexOf(e.key) > -1) {
+        e.preventDefault(); self.next();
+      } else if (['ArrowUp', 'ArrowLeft', 'PageUp'].indexOf(e.key) > -1) {
+        e.preventDefault(); self.prev();
+      } else if (e.key === 'Home') {
+        e.preventDefault(); self.goTo(0);
+      } else if (e.key === 'End') {
+        e.preventDefault(); self.goTo(self.total - 1);
+      }
+      self.fadeHints();
+    });
+
+    var touchY;
+    this.deck.addEventListener('touchstart', function(e) {
+      touchY = e.touches[0].clientY;
+    }, { passive: true });
+    this.deck.addEventListener('touchend', function(e) {
+      var dy = touchY - e.changedTouches[0].clientY;
+      if (Math.abs(dy) > 50) { dy > 0 ? self.next() : self.prev(); }
+    });
+  };
+
+  SlideEngine.prototype.observe = function() {
+    var self = this;
+    var obs = new IntersectionObserver(function(entries) {
+      entries.forEach(function(entry) {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('visible');
+          self.current = self.slides.indexOf(entry.target);
+          self.update();
+        }
+      });
+    }, { threshold: 0.5 });
+    this.slides.forEach(function(s) { obs.observe(s); });
+  };
+
+  SlideEngine.prototype.goTo = function(i) {
+    this.slides[Math.max(0, Math.min(i, this.total - 1))].scrollIntoView({ behavior: 'smooth' });
+  };
+
+  SlideEngine.prototype.next = function() {
+    if (this.current < this.total - 1) this.goTo(this.current + 1);
+  };
+
+  SlideEngine.prototype.prev = function() {
+    if (this.current > 0) this.goTo(this.current - 1);
+  };
+
+  SlideEngine.prototype.update = function() {
+    this.bar.style.width = ((this.current + 1) / this.total * 100) + '%';
+    var c = this.current;
+    this.dots.forEach(function(d, i) { d.classList.toggle('active', i === c); });
+    this.counter.textContent = (this.current + 1) + ' / ' + this.total;
+  };
+
+  SlideEngine.prototype.fadeHints = function() {
+    clearTimeout(this.hintTimer);
+    this.hints.classList.add('faded');
+  };
+</script>
+
+</body>
+</html>

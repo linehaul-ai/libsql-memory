@@ -52,6 +52,28 @@ wiring (`.mcp.json`, `hooks/`, `skills/`, `commands/`).
     └── fff-memory/          # the binary: serve | store | search | read | forget | stats | doctor | reindex
 ```
 
+## Plugin Packaging
+
+The repository is also the Claude Code plugin: `.claude-plugin/marketplace.json` declares one
+plugin, `fff-memory`, with `"source": "./"`, so the plugin root and the repo root are the same
+directory. `.claude-plugin/plugin.json` is **metadata-only** — it must never gain `skills`,
+`commands`, `hooks`, or `mcpServers` keys, because their absence is what lets Claude Code
+auto-discover `skills/`, `commands/`, `hooks/hooks.json`, and `.mcp.json` from the plugin root.
+`crates/fff-memory/tests/plugin_package.rs` asserts exactly that, along with the byte contents
+of all eight wiring files, so `cargo test --workspace` is the gate on plugin correctness.
+
+Installing it locally (required for dogfooding — the tools, hooks, and skill are inert until
+the plugin is both registered and enabled):
+
+```bash
+claude plugin marketplace add /Users/fakebizprez/Developer/projects/libsql-memory
+# then enable fff-memory@linehaul-ai-fff-memory via /plugin
+```
+
+Tool names are plugin-scoped once installed, e.g.
+`mcp__plugin_fff-memory_fff-memory__memory_store`. Pre-approve that one permission or the Stop
+hook silently skips its write.
+
 ## Build & Development Commands
 
 Run from the repo root:

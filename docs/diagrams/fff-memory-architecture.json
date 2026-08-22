@@ -1,0 +1,138 @@
+{
+  "canvas": {
+    "width": 1210,
+    "height": 1138,
+    "fps": 20,
+    "frames": 41
+  },
+  "signature": "@fff-memory",
+  "title": {
+    "prefix": "The internals of",
+    "highlight": "fff-memory",
+    "subtitle": "Write Smart, Search Cheap (Rust + fff-search + MCP)"
+  },
+  "input_title": "Agent / Triggers",
+  "inputs": [
+    {
+      "label": "Agent",
+      "icon": "file",
+      "color": "#7ee3d6"
+    },
+    {
+      "label": "Hooks",
+      "icon": "folder",
+      "color": "#ff7ab6"
+    },
+    {
+      "label": "CLI",
+      "icon": "file",
+      "color": "#f4b64e"
+    },
+    {
+      "label": "Doctor",
+      "icon": "file",
+      "color": "#7ee3d6"
+    }
+  ],
+  "core": {
+    "title": "fff Core",
+    "subtitle": "(zero-dep write · sub-ms search)",
+    "cards": [
+      {
+        "title": "Store",
+        "body": "Atomic Markdown\nfrontmatter & aliases",
+        "icon": "file"
+      },
+      {
+        "title": "Index",
+        "body": "fff-search cache\nLMDB frecency state",
+        "icon": "scan"
+      },
+      {
+        "title": "Search",
+        "body": "Layered retrieval\ntoken-budgeted score",
+        "icon": "db"
+      }
+    ]
+  },
+  "decision": {
+    "title": "Hit?",
+    "body": "ranked, explainable\nin token budget"
+  },
+  "output": {
+    "label": "Context",
+    "icon": "package"
+  },
+  "loop_label": "Access log updated on read · doctor sweeps decay",
+  "retry_label": "Miss / explain what tried",
+  "left_panel": {
+    "title": "5 MCP Tools",
+    "badge": "rmcp stdio",
+    "cards": [
+      {
+        "title": "Store & Forget",
+        "body": "memory_store\nmemory_forget",
+        "icon": "file"
+      },
+      {
+        "title": "Search & Read",
+        "body": "memory_search\nmemory_read",
+        "icon": "scan"
+      },
+      {
+        "title": "Stats & Why",
+        "body": "memory_stats\nexplainable rationale",
+        "icon": "db"
+      }
+    ]
+  },
+  "center_panel": {
+    "title": "Storage & Index Layers",
+    "subtitle": "(files source of truth · disposable index)",
+    "footer": "Zero Network + Zero IPC",
+    "cards": [
+      {
+        "title": "Notes",
+        "body": "YAML + Markdown\nalias discipline",
+        "icon": "file"
+      },
+      {
+        "title": "Access Log",
+        "body": "append-only log\nfrecency & decay",
+        "icon": "hash"
+      },
+      {
+        "title": "LMDB State",
+        "body": "frecency tracker\nquery history",
+        "icon": "db"
+      },
+      {
+        "title": "fff Index",
+        "body": "memory-index\nsub-ms search",
+        "icon": "scan"
+      }
+    ]
+  },
+  "right_panel": {
+    "title": "Agent Context Pack",
+    "incoming_label": "Inject",
+    "return_label": "Feedback",
+    "cards": [
+      {
+        "title": "Budgeted Snips",
+        "body": "token-budgeted\nsnippet first",
+        "icon": "package"
+      },
+      {
+        "title": "Project Rules",
+        "body": "architectural rules\npast decisions",
+        "icon": "file"
+      },
+      {
+        "title": "Self-Healing",
+        "body": "doctor sweep\nstale note prune",
+        "icon": "shield"
+      }
+    ]
+  }
+}
